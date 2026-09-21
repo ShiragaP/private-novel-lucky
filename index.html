@@ -241,6 +241,21 @@
             background: #feebc8;
             color: #744210;
         }
+        .badge-interrupted {
+            background: #fed7d7;
+            color: #9b2c2c;
+        }
+        .badge-idle {
+            background: #edf2f7;
+            color: #4a5568;
+        }
+        .btn-warning {
+            background: #dd6b20;
+            color: #ffffff;
+        }
+        .btn-warning:hover {
+            background: #c05621;
+        }
         .progress-bar-container {
             width: 100%;
             height: 8px;
@@ -373,7 +388,10 @@
             <div class="section-title">
                 <span>⚡ นิยายที่ดาวน์โหลดล่าสุด (20 รายการ)</span>
             </div>
-            <button class="btn btn-sm" onclick="loadAllData()">🔄 รีเฟรช</button>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-sm" onclick="recoverStuckDownloads()" title="ซ่อมแซมหรือกู้คืนนิยายที่ดาวน์โหลดค้างจากการรีสตาร์ท">🛠️ กู้คืนสถานะค้าง</button>
+                <button class="btn btn-sm" onclick="loadAllData()">🔄 รีเฟรช</button>
+            </div>
         </div>
         <div class="grid" id="libraryGrid">
             <div class="empty-state">กำลังโหลดรายการนิยาย...</div>
@@ -428,7 +446,15 @@
             try {
                 const res = await fetch('/api/library/latest?limit=20');
                 const data = await res.json();
-                renderLibrary(data.novels || []);
+                const novels = data.novels || [];
+                renderLibrary(novels);
+                // Auto-poll any novel that is currently downloading
+                novels.forEach(n => {
+                    if (n.status === 'downloading' && !activeJobs[n.id]) {
+                        activeJobs[n.id] = true;
+                        startPolling(n.id);
+                    }
+                });
             } catch (err) {
                 console.error(err);
                 document.getElementById('libraryGrid').innerHTML = '<div class="empty-state">ไม่สามารถโหลดข้อมูลคลังได้</div>';
@@ -437,6 +463,15 @@
 
         async function loadAllData() {
             await Promise.all([loadPinnedNovels(), loadLatestDownloaded()]);
+        }
+
+        async function recoverStuckDownloads() {
+            try {
+                await fetch('/api/download/recover', { method: 'POST' });
+                await loadAllData();
+            } catch (err) {
+                console.error(err);
+            }
         }
 
         // 3. Toggle Pin
@@ -470,18 +505,36 @@
             const dl = n.downloaded_chapters || 0;
             const percent = total > 0 ? Math.round((dl / total) * 100) : 0;
             const isCompleted = n.status === 'completed' || (total > 0 && dl >= total);
-            const isDownloading = n.status === 'downloading';
+            const isActivelyDownloading = Boolean(activeJobs[n.id]);
+            const isDownloading = n.status === 'downloading' || isActivelyDownloading;
+            const isInterrupted = n.status === 'interrupted' || n.status === 'error';
             const isPinned = Boolean(n.is_pinned);
             const novelLink = getNovelUrl(n);
             const cover = getImageUrl(n.cover_image);
+
+            let badgeClass = 'badge-idle';
+            let badgeText = 'พร้อมโหลด';
+            if (isCompleted) {
+                badgeClass = 'badge-completed';
+                badgeText = '✓ สมบูรณ์';
+            } else if (isActivelyDownloading) {
+                badgeClass = 'badge-downloading';
+                badgeText = '⏳ กำลังโหลด...';
+            } else if (isDownloading) {
+                badgeClass = 'badge-downloading';
+                badgeText = '⏳ รอโหลด / กำลังโหลด';
+            } else if (isInterrupted) {
+                badgeClass = 'badge-interrupted';
+                badgeText = '⚠️ ดาวน์โหลดไม่เสร็จ';
+            }
 
             return `
                 <div class="novel-card" id="card-${n.id}">
                     <img src="${cover}" referrerpolicy="no-referrer" class="card-cover" alt="${n.title}" onerror="this.src='/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg'">
                     <div class="card-body">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
-                            <span class="card-badge ${isCompleted ? 'badge-completed' : 'badge-downloading'}">
-                                ${isCompleted ? '✓ สมบูรณ์' : (isDownloading ? '⏳ กำลังโหลด...' : 'พร้อมโหลด')}
+                            <span class="card-badge ${badgeClass}">
+                                ${badgeText}
                             </span>
                             <button class="btn btn-sm btn-pin ${isPinned ? 'pinned' : ''}" onclick="togglePin(${n.id})" title="${isPinned ? 'ถอนหมุด' : 'ปักหมุดไว้บนสุด'}">
                                 ${isPinned ? '📌 ปักหมุดแล้ว' : '📍 ปักหมุด'}
@@ -490,12 +543,18 @@
                         <div class="card-title" title="${n.title}">${n.title}</div>
                         <div class="card-meta">
                             ${dl} / ${total} ตอน (${percent}%)
+                            ${n.error_message ? `<div style="color:#e53e3e; font-size:0.8rem; margin-top:3px;">${n.error_message}</div>` : ''}
                         </div>
                         <div class="progress-bar-container">
                             <div class="progress-bar-fill" style="width: ${percent}%;"></div>
                         </div>
-                        <div class="card-actions">
+                        <div class="card-actions" style="display:flex; gap:6px;">
                             <a href="${novelLink}" class="btn btn-sm" style="flex:1; justify-content:center;">📖 อ่านนิยาย</a>
+                            ${!isCompleted ? `
+                                <button class="btn btn-sm btn-warning" id="btn-resume-${n.id}" onclick="resumeDownload(${n.id}, event)" style="flex:1; justify-content:center;" title="ดาวน์โหลดต่อ หรือดึงตอนที่ยังขาด">
+                                    ${isActivelyDownloading ? '⏳ กำลังโหลด...' : '🔄 โหลดต่อ'}
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
                 </div>
@@ -580,7 +639,12 @@
                             </div>
                             <div class="card-actions">
                                 ${inLib ? `
-                                    <span class="btn btn-sm btn-success" style="flex:1; justify-content:center; opacity:0.8;">✓ ในคลังแล้ว</span>
+                                    <div style="display:flex; gap:6px; flex:1;">
+                                        <a href="${r.slug ? (r.title.includes('โรงพยาบาลจิตเวชพิศวง') ? '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/index.html' : `/novels/${r.slug}/index.html`) : '#'}" class="btn btn-sm btn-success" style="flex:1; justify-content:center;">✓ ในคลังแล้ว</a>
+                                        ${r.status !== 'completed' && r.downloaded_chapters < r.total_chapters && r.novel_id ? `
+                                            <button class="btn btn-sm btn-warning" onclick="resumeDownload(${r.novel_id}, event)" style="padding:6px 10px;" title="ดาวน์โหลดต่อ">🔄 โหลดต่อ</button>
+                                        ` : ''}
+                                    </div>
                                 ` : `
                                     <button class="btn btn-sm btn-success" id="dl-btn-${index}" onclick="triggerDownload('${r.url}', ${index})" style="flex:1; justify-content:center;">
                                         ⬇️ ดาวน์โหลดลงเซิร์ฟเวอร์
@@ -629,22 +693,54 @@
             }
         }
 
+        // 5. Resume Download
+        async function resumeDownload(novelId, e) {
+            if (e) e.stopPropagation();
+            const btn = document.getElementById(`btn-resume-${novelId}`);
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="loading-spinner"></span> เริ่มโหลดต่อ...';
+            }
+            try {
+                const res = await fetch(`/api/download/resume/${novelId}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'completed') {
+                    loadAllData();
+                } else {
+                    activeJobs[novelId] = true;
+                    loadLatestDownloaded();
+                    startPolling(novelId);
+                }
+            } catch (err) {
+                alert('ไม่สามารถเริ่มดาวน์โหลดต่อได้: ' + err.message);
+                loadLatestDownloaded();
+            }
+        }
+
         // Poll progress for active downloads
+        let activePollers = {};
+
         function startPolling(novelId) {
+            if (activePollers[novelId]) return;
             const timer = setInterval(async () => {
                 try {
                     const res = await fetch(`/api/download/status/${novelId}`);
                     const status = await res.json();
                     loadLatestDownloaded();
 
-                    if (status.status === 'completed' || status.status === 'error') {
+                    if (status.status === 'completed' || status.status === 'error' || status.status === 'interrupted') {
                         clearInterval(timer);
+                        delete activePollers[novelId];
                         delete activeJobs[novelId];
+                        loadAllData();
                     }
                 } catch (e) {
                     clearInterval(timer);
+                    delete activePollers[novelId];
+                    delete activeJobs[novelId];
                 }
-            }, 3000);
+            }, 2500);
+            activePollers[novelId] = timer;
         }
 
         // Initial load

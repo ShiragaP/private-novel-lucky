@@ -51,6 +51,12 @@ def on_startup():
     except Exception as e:
         print(f"[Server] Migration error on startup: {e}")
 
+    # Recover interrupted or stuck downloads caused by redeploy / server restart
+    try:
+        downloader.recover_interrupted_jobs()
+    except Exception as e:
+        print(f"[Server] Error recovering interrupted jobs on startup: {e}")
+
 class DownloadRequest(BaseModel):
     url: str
 
@@ -185,6 +191,28 @@ def start_download(req: DownloadRequest):
         return job
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Download initiation failed: {str(e)}")
+
+@app.post("/api/download/resume/{novel_id}")
+def resume_download_endpoint(novel_id: int):
+    """
+    Resume an interrupted download for a novel by its ID.
+    """
+    try:
+        result = downloader.resume_download(novel_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Resume failed: {str(e)}")
+
+@app.post("/api/download/recover")
+def recover_downloads_endpoint():
+    """
+    Scan and recover any stuck or interrupted downloads across all novels.
+    """
+    try:
+        downloader.recover_interrupted_jobs()
+        return {"status": "ok", "message": "Recovery scan executed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Recovery failed: {str(e)}")
 
 @app.get("/api/download/status/{novel_id}")
 def download_status(novel_id: int):

@@ -26,6 +26,15 @@ def generate_slug(title: str, url: str) -> str:
     slug = re.sub(r'[\\/:*?"<>|]+', '', title).strip()
     return slug or "novel"
 
+def safe_print(msg: str):
+    try:
+        print(msg)
+    except Exception:
+        try:
+            print(msg.encode("ascii", errors="backslashreplace").decode("ascii"))
+        except Exception:
+            pass
+
 class NovelDownloader:
     def __init__(self, db: DatabaseManager, base_storage_dir: str = None):
         self.db = db
@@ -57,6 +66,89 @@ class NovelDownloader:
         except Exception:
             pass
 
+    def resume_download(self, novel_id: int) -> Dict[str, Any]:
+        """
+        Resume downloading an interrupted novel or retry missing chapters.
+        """
+        with self.lock:
+            if novel_id in self.active_jobs and self.active_jobs[novel_id].get("status") == "downloading":
+                return {"novel_id": novel_id, "status": "already_downloading"}
+
+        novel = self.db.get_novel_by_id(novel_id)
+        if not novel:
+            return {"novel_id": novel_id, "status": "not_found"}
+
+        all_chapters = self.db.get_chapters_for_novel(novel_id)
+        pending = self.db.get_pending_chapters(novel_id)
+        total = len(all_chapters)
+        downloaded = total - len(pending)
+
+        if total > 0 and len(pending) == 0:
+            # All chapters already downloaded! Mark completed and regenerate TOC
+            self.db.update_novel_counts(novel_id, total, total)
+            self.db.update_novel_status(novel_id, "completed")
+            try:
+                novel_dir = self.get_novel_dir(novel)
+                html_gen = HtmlGenerator(output_dir=novel_dir)
+                html_gen.ensure_stylesheet()
+                html_gen.generate_toc_page(novel, all_chapters)
+            except Exception as e:
+                print(f"[Resume] Error generating TOC for novel {novel_id}: {e}")
+            return {"novel_id": novel_id, "status": "completed", "novel": self.db.get_novel_by_id(novel_id)}
+
+        self.db.update_novel_status(novel_id, "downloading")
+        with self.lock:
+            self.active_jobs[novel_id] = {
+                "novel_id": novel_id,
+                "title": novel.get("title", ""),
+                "status": "downloading",
+                "total": total,
+                "downloaded": downloaded,
+                "current": "Resuming...",
+                "error": None
+            }
+
+        t = threading.Thread(target=self._run_download_worker, args=(novel_id,), daemon=True)
+        t.start()
+
+        return {"novel_id": novel_id, "status": "resumed", "novel": self.db.get_novel_by_id(novel_id)}
+
+    def recover_interrupted_jobs(self):
+        """
+        On server startup / redeploy, check all novels in DB.
+        If a novel is stuck in 'downloading':
+        - If all chapters are already downloaded, mark completed and rebuild TOC.
+        - If chapters are still pending, automatically resume downloading in background.
+        """
+        try:
+            novels = self.db.list_novels()
+            for novel in novels:
+                novel_id = novel["id"]
+                status = novel.get("status")
+                if status == "downloading":
+                    all_chapters = self.db.get_chapters_for_novel(novel_id)
+                    pending = self.db.get_pending_chapters(novel_id)
+                    total = len(all_chapters)
+                    
+                    if total > 0 and len(pending) == 0:
+                        safe_print(f"[Recovery] Novel {novel_id} ({novel.get('slug')}) was stuck in 'downloading', but all {total} chapters are downloaded. Marking completed.")
+                        self.db.update_novel_counts(novel_id, total, total)
+                        self.db.update_novel_status(novel_id, "completed")
+                        try:
+                            novel_dir = self.get_novel_dir(novel)
+                            html_gen = HtmlGenerator(output_dir=novel_dir)
+                            html_gen.ensure_stylesheet()
+                            html_gen.generate_toc_page(novel, all_chapters)
+                        except Exception as e:
+                            safe_print(f"[Recovery] Error updating TOC for novel {novel_id}: {repr(e)}")
+                    elif len(pending) > 0:
+                        safe_print(f"[Recovery] Novel {novel_id} ({novel.get('slug')}) was interrupted with {len(pending)}/{total} chapters remaining. Auto-resuming...")
+                        self.resume_download(novel_id)
+                    elif total == 0:
+                        self.db.update_novel_status(novel_id, "error", "Interrupted before chapter list was saved")
+        except Exception as e:
+            safe_print(f"[Recovery] Error recovering interrupted jobs: {repr(e)}")
+
     def start_download(self, novel_url: str) -> Dict[str, Any]:
         with self.lock:
             # Check if novel already registered in DB
@@ -65,10 +157,8 @@ class NovelDownloader:
                 novel_id = existing["id"]
                 if novel_id in self.active_jobs and self.active_jobs[novel_id].get("status") == "downloading":
                     return {"novel_id": novel_id, "status": "already_downloading", "novel": existing}
-            else:
-                novel_id = None
 
-        # Fetch novel info synchronously to prepare records
+        # Fetch novel info synchronously to prepare records or update chapter list
         details = self.scraper.fetch_novel_details(novel_url)
         title = details["title"]
         slug = generate_slug(title, novel_url)
@@ -85,26 +175,7 @@ class NovelDownloader:
             total_chapters=total_chapters
         )
         self.db.upsert_chapters(novel_id, details["chapters"])
-        self.db.update_novel_status(novel_id, "downloading")
-
-        # Initialize job tracking
-        with self.lock:
-            self.active_jobs[novel_id] = {
-                "novel_id": novel_id,
-                "title": title,
-                "status": "downloading",
-                "total": total_chapters,
-                "downloaded": 0,
-                "current": "Starting...",
-                "error": None
-            }
-
-        # Spawn background worker thread
-        t = threading.Thread(target=self._run_download_worker, args=(novel_id,), daemon=True)
-        t.start()
-
-        novel_data = self.db.get_novel_by_id(novel_id)
-        return {"novel_id": novel_id, "status": "downloading", "novel": novel_data}
+        return self.resume_download(novel_id)
 
     def _run_download_worker(self, novel_id: int):
         novel = self.db.get_novel_by_id(novel_id)
@@ -168,17 +239,27 @@ class NovelDownloader:
                                 self.active_jobs[novel_id]["downloaded"] = downloaded
                                 self.active_jobs[novel_id]["current"] = f"บทที่ {chap_num}"
                     else:
-                        print(f"[Worker] Error downloading ch {chap_num} of novel {novel_id}: {err}")
+                        safe_print(f"[Worker] Error downloading ch {chap_num} of novel {novel_id}: {repr(err)}")
 
             # Re-fetch all chapters to generate complete Table of Contents
             all_chapters_updated = self.db.get_chapters_for_novel(novel_id)
             html_gen.generate_toc_page(novel, all_chapters_updated)
 
-            self.db.update_novel_status(novel_id, "completed")
-            with self.lock:
-                if novel_id in self.active_jobs:
-                    self.active_jobs[novel_id]["status"] = "completed"
-                    self.active_jobs[novel_id]["current"] = "Completed"
+            # Check if there are still pending chapters before marking completed
+            still_pending = self.db.get_pending_chapters(novel_id)
+            if still_pending:
+                err_msg = f"ยังขาดอีก {len(still_pending)} ตอน"
+                self.db.update_novel_status(novel_id, "error", err_msg)
+                with self.lock:
+                    if novel_id in self.active_jobs:
+                        self.active_jobs[novel_id]["status"] = "error"
+                        self.active_jobs[novel_id]["error"] = err_msg
+            else:
+                self.db.update_novel_status(novel_id, "completed")
+                with self.lock:
+                    if novel_id in self.active_jobs:
+                        self.active_jobs[novel_id]["status"] = "completed"
+                        self.active_jobs[novel_id]["current"] = "Completed"
         except Exception as e:
             self.db.update_novel_status(novel_id, "error", str(e))
             with self.lock:
@@ -194,12 +275,27 @@ class NovelDownloader:
         # Check DB
         novel = self.db.get_novel_by_id(novel_id)
         if novel:
+            all_ch = self.db.get_chapters_for_novel(novel_id)
+            pending = self.db.get_pending_chapters(novel_id)
+            total = len(all_ch) or novel.get("total_chapters", 0)
+            downloaded = total - len(pending)
+            status = novel.get("status")
+
+            # Auto-heal if stuck in downloading but server restarted
+            if status == "downloading" and novel_id not in self.active_jobs:
+                if total > 0 and len(pending) == 0:
+                    status = "completed"
+                    self.db.update_novel_counts(novel_id, total, total)
+                    self.db.update_novel_status(novel_id, "completed")
+                else:
+                    status = "interrupted"
+
             return {
                 "novel_id": novel_id,
                 "title": novel.get("title"),
-                "status": novel.get("status"),
-                "total": novel.get("total_chapters", 0),
-                "downloaded": novel.get("downloaded_chapters", 0),
+                "status": status,
+                "total": total,
+                "downloaded": downloaded,
                 "error": novel.get("error_message")
             }
         return {"novel_id": novel_id, "status": "not_found"}
