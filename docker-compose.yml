@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  postgres:
+  novel-postgres:
     image: postgres:16-alpine
     container_name: novel-postgres
     restart: unless-stopped
@@ -12,12 +12,14 @@ services:
     ports:
       - "21042:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - novel_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-novel} -d $${POSTGRES_DB:-novel_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - novel-network
 
   novel-reader:
     build: .
@@ -27,14 +29,20 @@ services:
       - "${PORT:-21041}:21041"
     environment:
       PORT: ${PORT:-21041}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-novel}:${POSTGRES_PASSWORD:-your_strong_password_here_SEP2026}@postgres:5432/${POSTGRES_DB:-novel_db}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-novel}:${POSTGRES_PASSWORD:-your_strong_password_here_SEP2026}@novel-postgres:5432/${POSTGRES_DB:-novel_db}}
     depends_on:
-      postgres:
+      novel-postgres:
         condition: service_healthy
     volumes:
       - ./novels:/app/novels
       - ./cache:/app/cache
       - ./ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง:/app/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง
+    networks:
+      - novel-network
+
+networks:
+  novel-network:
+    driver: bridge
 
 volumes:
-  postgres_data:
+  novel_postgres_data:
