@@ -30,6 +30,7 @@ services:
     environment:
       PORT: ${PORT:-21041}
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-novel}:${POSTGRES_PASSWORD:-your_strong_password_here_SEP2026}@novel-postgres:5432/${POSTGRES_DB:-novel_db}}
+      APP_PASSWORD: ${APP_PASSWORD:-novel1234}
     depends_on:
       novel-postgres:
         condition: service_healthy

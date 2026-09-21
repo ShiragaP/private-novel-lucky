@@ -1,9 +1,10 @@
 import os
 import sys
+import urllib.parse
 from typing import Optional, List
 from pydantic import BaseModel
-from fastapi import FastAPI, Query, HTTPException, BackgroundTasks, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks, Response, Request
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -21,6 +22,14 @@ from src.db import DatabaseManager
 from src.scraper import NovelScraper
 from src.downloader import NovelDownloader
 from src.migrate_sqlite_to_pg import migrate_legacy_novel_db
+from src.auth import (
+    AUTH_COOKIE_NAME,
+    get_app_password,
+    generate_auth_token,
+    is_valid_token,
+    sanitize_next_url,
+    render_login_page,
+)
 
 app = FastAPI(title="Lucky Novel Manager & Offline Reader", version="2.0.0")
 
@@ -31,6 +40,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+
+    # Public paths that bypass authentication
+    if (
+        path in ["/login", "/api/login", "/api/health", "/favicon.ico"]
+        or path.startswith("/login")
+    ):
+        return await call_next(request)
+
+    # Validate auth cookie
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    if is_valid_token(token):
+        return await call_next(request)
+
+    # If unauthorized:
+    if path.startswith("/api/"):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized. Please login."}
+        )
+
+    # Redirect browser requests to login page
+    next_url = request.url.path
+    if request.url.query:
+        next_url += f"?{request.url.query}"
+    encoded_next = urllib.parse.quote(next_url)
+    return RedirectResponse(url=f"/login?next={encoded_next}", status_code=303)
+
 
 # Initialize Database and Downloader
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -244,6 +284,70 @@ app.mount("/novels", StaticFiles(directory=novels_folder, html=True), name="nove
 static_folder = os.path.join(BASE_DIR, "static")
 os.makedirs(static_folder, exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_folder), name="static")
+
+# Authentication Routes
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: Optional[str] = "/"):
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    if is_valid_token(token):
+        return RedirectResponse(url=sanitize_next_url(next), status_code=303)
+    return HTMLResponse(render_login_page(next_url=sanitize_next_url(next)))
+
+@app.post("/login")
+async def handle_login(request: Request):
+    form_data = await request.form()
+    password = str(form_data.get("password", "")).strip()
+    next_url = sanitize_next_url(str(form_data.get("next", "/")))
+
+    app_pwd = get_app_password()
+    if password == app_pwd:
+        response = RedirectResponse(url=next_url, status_code=303)
+        token = generate_auth_token(app_pwd)
+        response.set_cookie(
+            key=AUTH_COOKIE_NAME,
+            value=token,
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            samesite="lax",
+            path="/"
+        )
+        return response
+
+    return HTMLResponse(
+        render_login_page(error_msg="รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง", next_url=next_url),
+        status_code=401
+    )
+
+@app.post("/api/login")
+async def api_login(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    password = str(data.get("password", "")).strip()
+    next_url = sanitize_next_url(str(data.get("next", "/")))
+
+    app_pwd = get_app_password()
+    if password == app_pwd:
+        token = generate_auth_token(app_pwd)
+        response = JSONResponse(content={"status": "ok", "redirect": next_url})
+        response.set_cookie(
+            key=AUTH_COOKIE_NAME,
+            value=token,
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            samesite="lax",
+            path="/"
+        )
+        return response
+
+    return JSONResponse(status_code=401, content={"status": "error", "message": "รหัสผ่านไม่ถูกต้อง"})
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+    return response
 
 # 4. Homepage
 @app.get("/")
