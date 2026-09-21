@@ -181,31 +181,37 @@ class HtmlGenerator:
         chapter_list_html = "\n".join(chapter_items)
 
         toc_html = f"""<!DOCTYPE html>
-<html lang="th">
+<html lang="th" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>สารบัญ - {novel_title}</title>
+    <title>{novel_title} - สารบัญ</title>
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 </head>
-<body class="toc-page">
+<body>
     <header class="reader-header">
         <div class="header-inner">
-            <a href="/" class="novel-title-link">
-                <span>🏠</span> กลับหน้าหลักคลังนิยาย
-            </a>
+            <span class="novel-title-link">
+                <span>📚</span> {novel_title}
+            </span>
             <div class="reader-settings">
+                <a href="/" class="btn-control" style="font-weight:600;">🏠 หน้าหลักคลังนิยาย</a>
                 <a href="chapters/chapter_0001.html" class="btn-control">📖 เริ่มอ่านบทที่ 1</a>
+                <select class="theme-selector" onchange="setTheme(this.value)" id="themeSelector">
+                    <option value="light">☀️ สว่าง (Light)</option>
+                    <option value="sepia">📜 ถนอมสายตา (Sepia)</option>
+                    <option value="dark">🌙 มืด (Dark)</option>
+                </select>
             </div>
         </div>
     </header>
 
-    <div class="toc-container">
-        <div class="toc-header">
-            <div class="toc-card">
+    <main class="reader-container">
+        <section class="toc-card">
+            <div class="toc-header">
                 {'<img src="' + cover_image + '" alt="' + novel_title + '" class="toc-cover">' if cover_image else ''}
                 <div class="toc-info">
                     <h1>{novel_title}</h1>
@@ -215,18 +221,25 @@ class HtmlGenerator:
                     <p class="toc-desc">{desc}</p>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <div class="toc-search-box">
-            <input type="text" id="chapterSearch" placeholder="🔍 พิมพ์ค้นหาตอน (เช่น บทที่ 10, ชื่อตอน)..." onkeyup="filterChapters()">
-        </div>
-
-        <div class="toc-grid" id="chapterGrid">
-            {chapter_list_html}
-        </div>
-    </div>
+        <section>
+            <input type="text" id="chapterSearch" class="toc-search" placeholder="🔍 ค้นหาตอน เช่น 'บทที่ 1' หรือคำค้นหาในชื่อตอน..." oninput="filterChapters()">
+            
+            <div class="chapter-grid" id="chapterGrid">
+                {chapter_list_html}
+            </div>
+        </section>
+    </main>
 
     <script>
+        function setTheme(theme) {{
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('novel_reader_theme', theme);
+            const selector = document.getElementById('themeSelector');
+            if (selector) selector.value = theme;
+        }}
+
         function filterChapters() {{
             const input = document.getElementById('chapterSearch').value.toLowerCase();
             const links = document.querySelectorAll('.chapter-link');
@@ -239,6 +252,11 @@ class HtmlGenerator:
                 }}
             }});
         }}
+
+        (function() {{
+            const savedTheme = localStorage.getItem('novel_reader_theme') || 'light';
+            setTheme(savedTheme);
+        }})();
     </script>
 </body>
 </html>
