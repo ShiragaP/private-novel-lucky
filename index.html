@@ -253,10 +253,25 @@
             background: var(--primary);
             transition: width 0.3s;
         }
+        .btn-pin {
+            background: #edf2f7;
+            color: #4a5568;
+            border: 1px solid #cbd5e0;
+        }
+        .btn-pin.pinned {
+            background: #fefcbf;
+            color: #975a16;
+            border-color: #ecc94b;
+            font-weight: 700;
+        }
+        .btn-pin:hover {
+            background: #e2e8f0;
+        }
         .card-actions {
             margin-top: auto;
             display: flex;
             gap: 8px;
+            align-items: center;
         }
         .empty-state {
             text-align: center;
@@ -341,12 +356,23 @@
             <div class="grid" id="onlineGrid"></div>
         </div>
 
+        <!-- Pinned Novels Section (Shows at top) -->
+        <div id="pinnedSection" style="display:none; margin-bottom: 36px;">
+            <div class="section-header">
+                <div class="section-title" style="color: #b7791f;">
+                    <span>📌 เรื่องที่ปักหมุดไว้ (Pinned)</span>
+                    <span id="pinnedCount" style="font-size:0.9rem; font-weight:normal; color:var(--text-muted);"></span>
+                </div>
+            </div>
+            <div class="grid" id="pinnedGrid"></div>
+        </div>
+
         <!-- Latest Downloaded Section (Top 20) -->
         <div class="section-header">
             <div class="section-title">
                 <span>⚡ นิยายที่ดาวน์โหลดล่าสุด (20 รายการ)</span>
             </div>
-            <button class="btn btn-sm" onclick="loadLatestDownloaded()">🔄 รีเฟรช</button>
+            <button class="btn btn-sm" onclick="loadAllData()">🔄 รีเฟรช</button>
         </div>
         <div class="grid" id="libraryGrid">
             <div class="empty-state">กำลังโหลดรายการนิยาย...</div>
@@ -374,7 +400,29 @@
             }
         }
 
-        // 1. Load 20 Latest Downloaded Novels
+        // 1. Load Pinned Novels
+        async function loadPinnedNovels() {
+            try {
+                const res = await fetch('/api/library/pinned');
+                const data = await res.json();
+                const novels = data.novels || [];
+                const section = document.getElementById('pinnedSection');
+                const grid = document.getElementById('pinnedGrid');
+                const count = document.getElementById('pinnedCount');
+
+                if (novels.length > 0) {
+                    section.style.display = 'block';
+                    count.textContent = `(${novels.length} เรื่อง)`;
+                    grid.innerHTML = novels.map(n => renderNovelCardHtml(n, true)).join('');
+                } else {
+                    section.style.display = 'none';
+                }
+            } catch (err) {
+                console.error('Pinned error:', err);
+            }
+        }
+
+        // 2. Load 20 Latest Downloaded Novels
         async function loadLatestDownloaded() {
             try {
                 const res = await fetch('/api/library/latest?limit=20');
@@ -386,11 +434,63 @@
             }
         }
 
+        async function loadAllData() {
+            await Promise.all([loadPinnedNovels(), loadLatestDownloaded()]);
+        }
+
+        // 3. Toggle Pin
+        async function togglePin(novelId) {
+            try {
+                const res = await fetch(`/api/novels/${novelId}/pin`, { method: 'POST' });
+                const data = await res.json();
+                loadAllData();
+            } catch (err) {
+                alert('ไม่สามารถเปลี่ยนสถานะปักหมุดได้: ' + err.message);
+            }
+        }
+
         function getNovelUrl(n) {
             if (n.title.includes('โรงพยาบาลจิตเวชพิศวง')) {
                 return '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/index.html';
             }
             return `/novels/${n.slug}/index.html`;
+        }
+
+        function renderNovelCardHtml(n, isPinnedSection = false) {
+            const total = n.total_chapters || 0;
+            const dl = n.downloaded_chapters || 0;
+            const percent = total > 0 ? Math.round((dl / total) * 100) : 0;
+            const isCompleted = n.status === 'completed' || (total > 0 && dl >= total);
+            const isDownloading = n.status === 'downloading';
+            const isPinned = Boolean(n.is_pinned);
+            const novelLink = getNovelUrl(n);
+            const cover = n.cover_image || '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg';
+
+            return `
+                <div class="novel-card" id="card-${n.id}">
+                    <img src="${cover}" class="card-cover" alt="${n.title}" onerror="this.src='/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg'">
+                    <div class="card-body">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
+                            <span class="card-badge ${isCompleted ? 'badge-completed' : 'badge-downloading'}">
+                                ${isCompleted ? '✓ สมบูรณ์' : (isDownloading ? '⏳ กำลังโหลด...' : 'พร้อมโหลด')}
+                            </span>
+                            <button class="btn btn-sm btn-pin ${isPinned ? 'pinned' : ''}" onclick="togglePin(${n.id})" title="${isPinned ? 'ถอนหมุด' : 'ปักหมุดไว้บนสุด'}">
+                                ${isPinned ? '📌 ปักหมุดแล้ว' : '📍 ปักหมุด'}
+                            </button>
+                        </div>
+                        <div class="card-title" title="${n.title}">${n.title}</div>
+                        <div class="card-meta">
+                            ${dl} / ${total} ตอน (${percent}%)
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" style="width: ${percent}%;"></div>
+                        </div>
+                        <div class="card-actions">
+                            <a href="${novelLink}" class="btn btn-sm" style="flex:1; justify-content:center;">📖 อ่านนิยาย</a>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
 
         function renderLibrary(novels) {
@@ -399,37 +499,7 @@
                 grid.innerHTML = '<div class="empty-state">ยังไม่มีนิยายในคลัง ค้นหาออนไลน์และกดดาวน์โหลดได้ทันที!</div>';
                 return;
             }
-
-            grid.innerHTML = novels.map(n => {
-                const total = n.total_chapters || 0;
-                const dl = n.downloaded_chapters || 0;
-                const percent = total > 0 ? Math.round((dl / total) * 100) : 0;
-                const isCompleted = n.status === 'completed' || (total > 0 && dl >= total);
-                const isDownloading = n.status === 'downloading';
-                const novelLink = getNovelUrl(n);
-                const cover = n.cover_image || '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg';
-
-                return `
-                    <div class="novel-card" id="card-${n.id}">
-                        <img src="${cover}" class="card-cover" alt="${n.title}" onerror="this.src='/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg'">
-                        <div class="card-body">
-                            <span class="card-badge ${isCompleted ? 'badge-completed' : 'badge-downloading'}">
-                                ${isCompleted ? '✓ ดาวน์โหลดสมบูรณ์' : (isDownloading ? '⏳ กำลังดาวน์โหลด...' : 'พร้อมดาวน์โหลด')}
-                            </span>
-                            <div class="card-title" title="${n.title}">${n.title}</div>
-                            <div class="card-meta">
-                                ${dl} / ${total} ตอน (${percent}%)
-                            </div>
-                            <div class="progress-bar-container">
-                                <div class="progress-bar-fill" style="width: ${percent}%;"></div>
-                            </div>
-                            <div class="card-actions">
-                                <a href="${novelLink}" class="btn btn-sm" style="flex:1; justify-content:center;">📖 อ่านนิยาย</a>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
+            grid.innerHTML = novels.map(n => renderNovelCardHtml(n)).join('');
         }
 
         // 2. Search Downloaded Library
@@ -569,7 +639,7 @@
         }
 
         // Initial load
-        loadLatestDownloaded();
+        loadAllData();
     </script>
 </body>
 </html>

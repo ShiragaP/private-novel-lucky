@@ -117,6 +117,33 @@ def get_latest_chapters(limit: int = 20):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/library/pinned")
+def get_pinned_novels():
+    """
+    Get all pinned novels to show at the top of the homepage.
+    """
+    try:
+        novels = db.get_pinned_novels()
+        return {"count": len(novels), "novels": novels}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/novels/{novel_id}/pin")
+def toggle_pin_novel(novel_id: int):
+    """
+    Pin or unpin a novel.
+    """
+    try:
+        novel = db.get_novel_by_id(novel_id)
+        if not novel:
+            raise HTTPException(status_code=404, detail="Novel not found")
+        new_state = db.toggle_pin(novel_id)
+        return {"novel_id": novel_id, "is_pinned": new_state}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/download")
 def start_download(req: DownloadRequest):
     """

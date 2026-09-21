@@ -62,9 +62,11 @@ class DatabaseManager:
                         downloaded_chapters INTEGER DEFAULT 0,
                         status TEXT DEFAULT 'idle',
                         error_message TEXT,
+                        is_pinned BOOLEAN DEFAULT FALSE,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     );
+                    ALTER TABLE novels ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;
                     CREATE TABLE IF NOT EXISTS chapters (
                         id SERIAL PRIMARY KEY,
                         novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
@@ -100,10 +102,15 @@ class DatabaseManager:
                         downloaded_chapters INTEGER DEFAULT 0,
                         status TEXT DEFAULT 'idle',
                         error_message TEXT,
+                        is_pinned INTEGER DEFAULT 0,
                         created_at TEXT,
                         updated_at TEXT
                     );
                 """)
+                cur.execute("PRAGMA table_info(novels);")
+                cols = [c[1] for c in cur.fetchall()]
+                if "is_pinned" not in cols:
+                    cur.execute("ALTER TABLE novels ADD COLUMN is_pinned INTEGER DEFAULT 0;")
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS chapters (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -527,4 +534,61 @@ class DatabaseManager:
                 return [dict(r) for r in cur.fetchall()]
         finally:
             self._release_conn(conn)
+
+    def toggle_pin(self, novel_id: int) -> bool:
+        """
+        Toggles the is_pinned status of a novel. Returns new pinned state.
+        """
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            if self.is_postgres:
+                cur.execute("""
+                    UPDATE novels
+                    SET is_pinned = NOT COALESCE(is_pinned, FALSE), updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING is_pinned;
+                """, (novel_id,))
+                new_state = cur.fetchone()[0]
+            else:
+                cur.execute("SELECT is_pinned FROM novels WHERE id = ?", (novel_id,))
+                row = cur.fetchone()
+                current_state = bool(row[0] if row else 0)
+                new_state = not current_state
+                cur.execute("""
+                    UPDATE novels
+                    SET is_pinned = ?, updated_at = ?
+                    WHERE id = ?
+                """, (1 if new_state else 0, datetime.now().isoformat(), novel_id))
+            conn.commit()
+            return bool(new_state)
+        finally:
+            self._release_conn(conn)
+
+    def get_pinned_novels(self) -> List[Dict[str, Any]]:
+        """
+        Returns all pinned novels.
+        """
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            if self.is_postgres:
+                import psycopg2.extras
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("""
+                    SELECT * FROM novels
+                    WHERE is_pinned = TRUE
+                    ORDER BY updated_at DESC, id DESC
+                """)
+                return [dict(r) for r in cur.fetchall()]
+            else:
+                cur.execute("""
+                    SELECT * FROM novels
+                    WHERE is_pinned = 1
+                    ORDER BY updated_at DESC, id DESC
+                """)
+                return [dict(r) for r in cur.fetchall()]
+        finally:
+            self._release_conn(conn)
+
 
