@@ -78,7 +78,7 @@ class HtmlGenerator:
                     <option value="dark">🌙 มืด (Dark)</option>
                 </select>
                 <a href="../index.html" class="btn-control">📑 สารบัญ</a>
-                <a href="/" class="btn-control">🏠 คลังนิยาย</a>
+                <a href="/" class="btn-control" style="font-weight:600; color:var(--accent-color);">🏠 หน้าหลัก</a>
             </div>
         </div>
     </header>

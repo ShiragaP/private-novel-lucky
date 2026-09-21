@@ -2,11 +2,12 @@ import os
 import sys
 from typing import Optional, List
 from pydantic import BaseModel
-from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import httpx
 
 # Set safe stdout encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -60,6 +61,30 @@ def health_check():
         "db": "postgres" if db.is_postgres else "sqlite",
         "postgres_error": getattr(db, "postgres_error", None)
     }
+
+@app.get("/api/proxy/image")
+def proxy_image(url: str = Query(...)):
+    """
+    Proxies novel cover images to bypass novel-lucky.com anti-hotlinking referer restrictions.
+    """
+    if not url or not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Invalid image URL")
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+        }
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp = client.get(url, headers=headers)
+            if resp.status_code == 200:
+                content_type = resp.headers.get("content-type", "image/jpeg")
+                return Response(content=resp.content, media_type=content_type, headers={"Cache-Control": "public, max-age=604800"})
+            else:
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch image")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/search")
 def search_online(q: str = Query(..., min_length=1)):

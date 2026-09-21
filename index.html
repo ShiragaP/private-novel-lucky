@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
     <title>Lucky Novel Reader & Manager - คลังนิยายออฟไลน์</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -456,6 +457,14 @@
             return `/novels/${n.slug}/index.html`;
         }
 
+        function getImageUrl(url) {
+            if (!url) return '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg';
+            if (url.startsWith('http')) {
+                return `/api/proxy/image?url=${encodeURIComponent(url)}`;
+            }
+            return url;
+        }
+
         function renderNovelCardHtml(n, isPinnedSection = false) {
             const total = n.total_chapters || 0;
             const dl = n.downloaded_chapters || 0;
@@ -464,11 +473,11 @@
             const isDownloading = n.status === 'downloading';
             const isPinned = Boolean(n.is_pinned);
             const novelLink = getNovelUrl(n);
-            const cover = n.cover_image || '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg';
+            const cover = getImageUrl(n.cover_image);
 
             return `
                 <div class="novel-card" id="card-${n.id}">
-                    <img src="${cover}" class="card-cover" alt="${n.title}" onerror="this.src='/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg'">
+                    <img src="${cover}" referrerpolicy="no-referrer" class="card-cover" alt="${n.title}" onerror="this.src='/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg'">
                     <div class="card-body">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
                             <span class="card-badge ${isCompleted ? 'badge-completed' : 'badge-downloading'}">
@@ -559,10 +568,10 @@
 
             grid.innerHTML = results.map((r, index) => {
                 const inLib = r.in_library;
-                const cover = r.cover_image || '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg';
+                const cover = getImageUrl(r.cover_image);
                 return `
                     <div class="novel-card">
-                        <img src="${cover}" class="card-cover" alt="${r.title}" onerror="this.src='/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg'">
+                        <img src="${cover}" referrerpolicy="no-referrer" class="card-cover" alt="${r.title}" onerror="this.src='/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg'">
                         <div class="card-body">
                             <div class="card-title" title="${r.title}">${r.title}</div>
                             <div class="card-meta">
