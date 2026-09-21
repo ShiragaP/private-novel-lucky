@@ -1,0 +1,7 @@
+services:
+  novel-reader:
+    build: .
+    container_name: novel-reader
+    ports:
+      - "8080:80"
+    restart: unless-stopped
