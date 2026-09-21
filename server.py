@@ -55,7 +55,11 @@ class DownloadRequest(BaseModel):
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "db": "postgres" if db.is_postgres else "sqlite"}
+    return {
+        "status": "ok",
+        "db": "postgres" if db.is_postgres else "sqlite",
+        "postgres_error": getattr(db, "postgres_error", None)
+    }
 
 @app.get("/api/search")
 def search_online(q: str = Query(..., min_length=1)):

@@ -14,18 +14,34 @@ class DatabaseManager:
         self.db_url = database_url or os.environ.get("DATABASE_URL")
         self.is_postgres = bool(self.db_url and (self.db_url.startswith("postgres://") or self.db_url.startswith("postgresql://")))
         self.lock = threading.Lock()
+        self.postgres_error = None
+        self.sqlite_path = os.environ.get("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "novel_library.db"))
+        os.makedirs(os.path.dirname(os.path.abspath(self.sqlite_path)), exist_ok=True)
 
         if self.is_postgres:
             import psycopg2
             from psycopg2.pool import ThreadedConnectionPool
-            # Normalize postgres:// to postgresql:// if needed
             if self.db_url.startswith("postgres://"):
                 self.db_url = "postgresql://" + self.db_url[len("postgres://"):]
-            self.pool = ThreadedConnectionPool(minconn=1, maxconn=20, dsn=self.db_url)
-        else:
-            import sqlite3
-            self.sqlite_path = os.environ.get("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "novel_library.db"))
-            os.makedirs(os.path.dirname(os.path.abspath(self.sqlite_path)), exist_ok=True)
+            
+            # Retry connecting up to 5 times (in case Postgres is booting up)
+            connected = False
+            for attempt in range(1, 6):
+                try:
+                    self.pool = ThreadedConnectionPool(minconn=1, maxconn=20, dsn=self.db_url)
+                    connected = True
+                    print(f"[Database] Connected to PostgreSQL successfully (attempt {attempt}).")
+                    break
+                except Exception as e:
+                    self.postgres_error = str(e)
+                    print(f"[Database] PostgreSQL connection attempt {attempt}/5 failed: {e}")
+                    if attempt < 5:
+                        import time
+                        time.sleep(2)
+            
+            if not connected:
+                print(f"[Database] WARNING: Could not reach PostgreSQL. Falling back to local SQLite ({self.sqlite_path}).")
+                self.is_postgres = False
 
         self.init_db()
 
