@@ -1,11 +1,25 @@
-FROM nginx:alpine
+FROM python:3.12-slim
 
-# Copy custom Nginx configuration with UTF-8 charset
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
-# Copy all static novel web pages and assets
-COPY . /usr/share/nginx/html
+# Install build dependencies for psycopg2 and lxml
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 80 21041
+# Install python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["nginx", "-g", "daemon off;"]
+# Copy application source and assets
+COPY . .
+
+# Expose app port
+EXPOSE 21041
+
+ENV PORT=21041
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "server.py"]

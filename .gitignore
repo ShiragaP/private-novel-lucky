@@ -39,3 +39,8 @@ ENV/
 Thumbs.db
 desktop.ini
 *.tmp
+
+# Cache
+cache/
+data/
+

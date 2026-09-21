@@ -1,7 +1,40 @@
+version: '3.8'
+
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: novel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: novel
+      POSTGRES_PASSWORD: novelpass_secure_21042
+      POSTGRES_DB: novel_db
+    ports:
+      - "21042:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novel -d novel_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   novel-reader:
     build: .
     container_name: novel-reader
+    restart: unless-stopped
     ports:
       - "21041:21041"
-    restart: unless-stopped
+    environment:
+      PORT: 21041
+      DATABASE_URL: postgresql://novel:novelpass_secure_21042@postgres:5432/novel_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./novels:/app/novels
+      - ./cache:/app/cache
+      - ./ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง:/app/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง
+
+volumes:
+  postgres_data:
