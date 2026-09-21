@@ -6,15 +6,15 @@ services:
     container_name: novel-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: novel
-      POSTGRES_PASSWORD: novelpass_secure_21042
-      POSTGRES_DB: novel_db
+      POSTGRES_USER: ${POSTGRES_USER:-novel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_strong_password_here_SEP2026}
+      POSTGRES_DB: ${POSTGRES_DB:-novel_db}
     ports:
       - "21042:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U novel -d novel_db"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-novel} -d $${POSTGRES_DB:-novel_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -24,10 +24,10 @@ services:
     container_name: novel-reader
     restart: unless-stopped
     ports:
-      - "21041:21041"
+      - "${PORT:-21041}:21041"
     environment:
-      PORT: 21041
-      DATABASE_URL: postgresql://novel:novelpass_secure_21042@postgres:5432/novel_db
+      PORT: ${PORT:-21041}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-novel}:${POSTGRES_PASSWORD:-your_strong_password_here_SEP2026}@postgres:5432/${POSTGRES_DB:-novel_db}}
     depends_on:
       postgres:
         condition: service_healthy
