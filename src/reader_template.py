@@ -168,6 +168,7 @@ def clean_chapter_title(title: str, novel_title: str = "") -> str:
     return title.strip()
 
 def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> str:
+    novel_id = novel.get("id", 0)
     novel_title = html.escape(novel.get("title", ""))
     slug = novel.get("slug", "")
     cover_image = novel.get("cover_image", "")
@@ -248,6 +249,20 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
 
     <main class="reader-container">
         <section class="toc-card">
+            <div class="toc-menu-wrapper">
+                <button id="btnTocMenu" class="btn-toc-menu" onclick="toggleTocMenu(event)" title="ตัวเลือกเพิ่มเติม" aria-label="ตัวเลือกเพิ่มเติม">
+                    ⋮
+                </button>
+                <div id="tocDropdownMenu" class="toc-dropdown-menu">
+                    <button class="toc-menu-item" onclick="redownloadThisNovel({novel_id})">
+                        <span>🔄</span> ดาวน์โหลดใหม่ทั้งหมด
+                    </button>
+                    <div style="height:1px; background:var(--border-color); opacity:0.6;"></div>
+                    <button class="toc-menu-item item-danger" onclick="deleteThisNovel({novel_id})">
+                        <span>🗑️</span> ลบนิยายเรื่องนี้
+                    </button>
+                </div>
+            </div>
             <div class="toc-header">
                 {'<img src="' + cover_image + '" alt="' + novel_title + '" class="toc-cover">' if cover_image else ''}
                 <div class="toc-info">
@@ -361,6 +376,63 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
                     btn.disabled = false;
                     btn.textContent = '✨ สั่ง AI เกลาภาษานิยายเรื่องนี้';
                 }}
+            }}
+        }}
+
+        // Vertical ... Menu Actions
+        function toggleTocMenu(e) {{
+            if (e) e.stopPropagation();
+            const m = document.getElementById('tocDropdownMenu');
+            if (m) m.classList.toggle('show');
+        }}
+
+        document.addEventListener('click', function(e) {{
+            const m = document.getElementById('tocDropdownMenu');
+            const btn = document.getElementById('btnTocMenu');
+            if (m && m.classList.contains('show')) {{
+                if (!m.contains(e.target) && e.target !== btn) {{
+                    m.classList.remove('show');
+                }}
+            }}
+        }});
+
+        async function redownloadThisNovel(novelId) {{
+            const m = document.getElementById('tocDropdownMenu');
+            if (m) m.classList.remove('show');
+            if (!confirm('คุณต้องการดาวน์โหลดนิยายเรื่องนี้ใหม่ทั้งหมดใช่หรือไม่?\\n(ระบบจะดึงเนื้อหาทุกตอนใหม่ และรีเซ็ตสถานะการเกลาภาษา)')) {{
+                return;
+            }}
+            try {{
+                const res = await fetch(`/api/novels/${{novelId}}/redownload`, {{ method: 'POST' }});
+                const data = await res.json();
+                if (res.ok) {{
+                    alert('✅ ' + (data.message || 'เริ่มดาวน์โหลดใหม่แล้ว'));
+                    window.location.reload();
+                }} else {{
+                    alert('❌ เกิดข้อผิดพลาด: ' + (data.detail || data.message));
+                }}
+            }} catch (err) {{
+                alert('เกิดข้อผิดพลาด: ' + err.message);
+            }}
+        }}
+
+        async function deleteThisNovel(novelId) {{
+            const m = document.getElementById('tocDropdownMenu');
+            if (m) m.classList.remove('show');
+            if (!confirm('⚠️ คำเตือน: คุณแน่ใจหรือไม่ว่าต้องการลบนิยายเรื่องนี้และเนื้อหาทั้งหมดออกจากระบบอย่างถาวร?')) {{
+                return;
+            }}
+            try {{
+                const res = await fetch(`/api/novels/${{novelId}}`, {{ method: 'DELETE' }});
+                const data = await res.json();
+                if (res.ok) {{
+                    alert('✅ ' + (data.message || 'ลบนิยายเรียบร้อยแล้ว'));
+                    window.location.href = '/';
+                }} else {{
+                    alert('❌ ไม่สามารถลบนิยายได้: ' + (data.detail || data.message));
+                }}
+            }} catch (err) {{
+                alert('เกิดข้อผิดพลาด: ' + err.message);
             }}
         }}
 

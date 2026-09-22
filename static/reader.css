@@ -226,12 +226,97 @@ body {
 
 /* Table of Contents / Index styles */
 .toc-card {
+    position: relative;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 24px;
     margin-bottom: 30px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.toc-menu-wrapper {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 50;
+}
+
+.btn-toc-menu {
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--button-bg);
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.1s ease;
+}
+
+.btn-toc-menu:hover {
+    background: var(--button-hover-bg);
+}
+
+.btn-toc-menu:active {
+    transform: scale(0.96);
+}
+
+.toc-dropdown-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    min-width: 220px;
+    overflow: hidden;
+    z-index: 100;
+}
+
+.toc-dropdown-menu.show {
+    display: block;
+    animation: fadeInMenu 0.15s ease-out;
+}
+
+@keyframes fadeInMenu {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.toc-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 16px;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    font-size: 0.92rem;
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.toc-menu-item:hover {
+    background: var(--button-bg);
+}
+
+.toc-menu-item.item-danger {
+    color: #ef4444;
+}
+
+.toc-menu-item.item-danger:hover {
+    background: rgba(239, 68, 68, 0.1);
 }
 
 .toc-header {

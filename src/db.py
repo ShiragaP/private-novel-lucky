@@ -683,4 +683,89 @@ class DatabaseManager:
         finally:
             self._release_conn(conn)
 
+    def delete_novel(self, novel_id: int) -> bool:
+        """
+        Deletes a novel and its chapters permanently from the database.
+        """
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            if self.is_postgres:
+                cur.execute("DELETE FROM novels WHERE id = %s", (novel_id,))
+            else:
+                cur.execute("DELETE FROM chapters WHERE novel_id = ?", (novel_id,))
+                cur.execute("DELETE FROM novels WHERE id = ?", (novel_id,))
+            conn.commit()
+            return True
+        finally:
+            self._release_conn(conn)
+
+    def reset_novel_downloads(self, novel_id: int) -> bool:
+        """
+        Resets chapter contents and download status for redownloading.
+        """
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            if self.is_postgres:
+                cur.execute("""
+                    UPDATE chapters
+                    SET is_downloaded = FALSE,
+                        is_cleaned = FALSE,
+                        content_text = NULL,
+                        content_html = NULL,
+                        font_url = NULL,
+                        cleaned_at = NULL,
+                        fetched_at = NULL,
+                        prompt_tokens = 0,
+                        candidate_tokens = 0,
+                        cost_usd = 0.0,
+                        cost_thb = 0.0
+                    WHERE novel_id = %s;
+                """, (novel_id,))
+                cur.execute("""
+                    UPDATE novels
+                    SET downloaded_chapters = 0,
+                        status = 'downloading',
+                        error_message = NULL,
+                        total_prompt_tokens = 0,
+                        total_candidate_tokens = 0,
+                        total_clean_cost_usd = 0.0,
+                        total_clean_cost_thb = 0.0,
+                        updated_at = NOW()
+                    WHERE id = %s;
+                """, (novel_id,))
+            else:
+                cur.execute("""
+                    UPDATE chapters
+                    SET is_downloaded = 0,
+                        is_cleaned = 0,
+                        content_text = NULL,
+                        content_html = NULL,
+                        font_url = NULL,
+                        cleaned_at = NULL,
+                        fetched_at = NULL,
+                        prompt_tokens = 0,
+                        candidate_tokens = 0,
+                        cost_usd = 0.0,
+                        cost_thb = 0.0
+                    WHERE novel_id = ?;
+                """, (novel_id,))
+                cur.execute("""
+                    UPDATE novels
+                    SET downloaded_chapters = 0,
+                        status = 'downloading',
+                        error_message = NULL,
+                        total_prompt_tokens = 0,
+                        total_candidate_tokens = 0,
+                        total_clean_cost_usd = 0.0,
+                        total_clean_cost_thb = 0.0,
+                        updated_at = ?
+                    WHERE id = ?;
+                """, (datetime.now().isoformat(), novel_id))
+            conn.commit()
+            return True
+        finally:
+            self._release_conn(conn)
+
 

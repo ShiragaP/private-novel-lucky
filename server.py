@@ -282,6 +282,37 @@ def list_novels():
     """
     return db.list_novels()
 
+@app.post("/api/novels/{novel_id}/redownload")
+def redownload_novel(novel_id: int):
+    """
+    Reset and re-download all chapters for a novel from source.
+    """
+    novel = db.get_novel_by_id(novel_id)
+    if not novel:
+        raise HTTPException(status_code=404, detail="Novel not found")
+    try:
+        job = downloader.redownload(novel_id)
+        return {"status": "ok", "message": f"เริ่มดาวน์โหลด '{novel.get('title')}' ใหม่ทั้งหมดแล้ว", "job": job}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Redownload failed: {str(e)}")
+
+@app.delete("/api/novels/{novel_id}")
+@app.post("/api/novels/{novel_id}/delete")
+def delete_novel(novel_id: int):
+    """
+    Delete a novel, its chapters, and files permanently.
+    """
+    novel = db.get_novel_by_id(novel_id)
+    if not novel:
+        raise HTTPException(status_code=404, detail="Novel not found")
+    try:
+        title = novel.get("title", f"ID {novel_id}")
+        downloader.delete_novel_files(novel)
+        db.delete_novel(novel_id)
+        return {"status": "ok", "message": f"ลบนิยาย '{title}' เรียบร้อยแล้ว"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+
 # LLM Auto-Cleaner Control Endpoints
 @app.get("/api/cleaner/status")
 def get_cleaner_status():

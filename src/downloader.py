@@ -293,3 +293,48 @@ class NovelDownloader:
                 "error": novel.get("error_message")
             }
         return {"novel_id": novel_id, "status": "not_found"}
+
+    def redownload(self, novel_id: int) -> Dict[str, Any]:
+        """
+        Resets and re-downloads all chapters of a novel, updating chapter list from source.
+        """
+        novel = self.db.get_novel_by_id(novel_id)
+        if not novel:
+            return {"novel_id": novel_id, "status": "not_found"}
+
+        source_url = novel.get("source_url")
+        if source_url:
+            try:
+                details = self.scraper.fetch_novel_details(source_url)
+                if details.get("chapters"):
+                    self.db.upsert_chapters(novel_id, details["chapters"])
+                    self.db.update_novel_counts(novel_id, 0, details.get("total_chapters", len(details["chapters"])))
+            except Exception as e:
+                safe_print(f"[Redownload] Warning refreshing chapters from source: {e}")
+
+        # Reset download records in DB
+        self.db.reset_novel_downloads(novel_id)
+
+        # Clear active job cache
+        with self.lock:
+            if novel_id in self.active_jobs:
+                del self.active_jobs[novel_id]
+
+        # Trigger download worker
+        return self.resume_download(novel_id)
+
+    def delete_novel_files(self, novel: Dict[str, Any]):
+        """
+        Deletes the novel local storage directory and removes active jobs.
+        """
+        novel_id = novel.get("id")
+        with self.lock:
+            if novel_id in self.active_jobs:
+                del self.active_jobs[novel_id]
+
+        slug = novel.get("slug")
+        if slug:
+            novel_dir = os.path.join(self.base_storage_dir, "novels", slug)
+            if os.path.exists(novel_dir):
+                import shutil
+                shutil.rmtree(novel_dir, ignore_errors=True)
