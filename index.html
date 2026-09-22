@@ -661,8 +661,11 @@
                         <div class="progress-bar-container">
                             <div class="progress-bar-fill" style="width: ${percent}%;"></div>
                         </div>
-                        <div class="card-actions" style="display:flex; gap:6px;">
-                            <a href="${novelLink}" class="btn btn-sm" style="flex:1; justify-content:center;">📖 อ่านนิยาย</a>
+                        <div class="card-actions" style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <a href="${novelLink}" class="btn btn-sm" style="flex:1; justify-content:center;">📖 อ่าน</a>
+                            <button class="btn btn-sm" id="btn-clean-${n.id}" onclick="triggerCleanNovel(${n.id}, '${n.title.replace(/'/g, "\\'")}', event)" style="background:#7c3aed; color:white; justify-content:center; flex:1;" title="สั่งให้ AI เกลาภาษานิยายเรื่องนี้ทันที">
+                                ✨ เกลาภาษา
+                            </button>
                             ${!isCompleted ? `
                                 <button class="btn btn-sm btn-warning" id="btn-resume-${n.id}" onclick="resumeDownload(${n.id}, event)" style="flex:1; justify-content:center;" title="ดาวน์โหลดต่อ หรือดึงตอนที่ยังขาด">
                                     ${isActivelyDownloading ? '⏳ กำลังโหลด...' : '🔄 โหลดต่อ'}
@@ -896,13 +899,13 @@
                     if (btn) {
                         btn.className = 'btn btn-sm btn-cleaner-action btn-cleaner-resume';
                         btnIcon.textContent = '▶️';
-                        btnText.textContent = 'ทำงานต่อ (Resume)';
+                        btnText.textContent = 'ทำงานต่อ (เฉพาะเรื่องที่ปักหมุด 📌)';
                     }
-                    stats.innerHTML = `เกลาเสร็จแล้วในเซสชัน: <strong>${cleaned}</strong> ตอน | ค่าใช้จ่ายสะสม: <strong>$${costUsd.toFixed(4)}</strong> (~${costThb.toFixed(2)}฿) • โมเดล: <code>${model}</code>`;
+                    stats.innerHTML = `เกลาเสร็จแล้วในเซสชัน: <strong>${cleaned}</strong> ตอน | ค่าใช้จ่ายสะสม: <strong>$${costUsd.toFixed(4)}</strong> (~${costThb.toFixed(2)}฿) • <em>เมื่อกด Resume จะเกลาเฉพาะเรื่องที่ปักหมุด 📌</em>`;
                 } else {
                     const isProc = data.status === 'processing';
                     badge.className = 'cleaner-pill pill-active';
-                    badge.textContent = isProc ? '⚡ กำลังเกลาข้อความ...' : '🟢 สแตนด์บายพร้อมทำงาน';
+                    badge.textContent = isProc ? '⚡ กำลังเกลาข้อความ (เฉพาะเรื่องที่ปักหมุด 📌)...' : '🟢 ทำงานอยู่ (เฉพาะเรื่องที่ปักหมุด 📌)';
                     if (btn) {
                         btn.className = 'btn btn-sm btn-cleaner-action';
                         btnIcon.textContent = '⏸️';
@@ -925,6 +928,31 @@
                 alert('เกิดข้อผิดพลาดในการเปลี่ยนสถานะ AI Cleaner');
             } finally {
                 if (btn) btn.disabled = false;
+            }
+        }
+
+        async function triggerCleanNovel(novelId, title, e) {
+            if (e) e.stopPropagation();
+            if (!confirm(`คุณต้องการสั่งให้ AI เริ่มเกลาภาษานิยาย "${title}" (เฉพาะตอนที่ยังไม่ได้เกลา) ใช่หรือไม่?`)) {
+                return;
+            }
+            const btn = document.getElementById(`btn-clean-${novelId}`);
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="loading-spinner"></span> สั่งเกลา...';
+            }
+            try {
+                const res = await fetch(`/api/cleaner/clean-novel/${novelId}`, { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || 'เริ่มเกลาภาษาในพื้นหลังแล้ว!');
+                updateCleanerWidget();
+            } catch (err) {
+                alert('เกิดข้อผิดพลาด: ' + err.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '✨ เกลาภาษา';
+                }
             }
         }
 

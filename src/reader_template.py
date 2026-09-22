@@ -253,6 +253,13 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
                         <span style="color:var(--accent-color); font-weight:600;">✨ เกลาภาษาแล้ว <strong>{cleaned}</strong> ตอน</span>
                         {stats_extra}
                     </div>
+                    {f'''
+                    <div style="margin-top:10px;">
+                        <button id="btnCleanAllInNovel" class="btn-control" onclick="cleanThisNovel({novel.get('id', 0)})" style="background:#7c3aed; color:#fff; border-color:#6d28d9; font-weight:600; cursor:pointer;" title="สั่งให้ AI เกลาภาษาเฉพาะนิยายเรื่องนี้">
+                            ✨ สั่ง AI เกลาภาษานิยายเรื่องนี้ ({pending_clean} ตอนที่ยังไม่ได้เกลา)
+                        </button>
+                    </div>
+                    ''' if pending_clean > 0 else ''}
                     <p class="toc-desc">{desc}</p>
                 </div>
             </div>
@@ -330,6 +337,27 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
             }}
         }}
 
+        async function cleanThisNovel(novelId) {{
+            const btn = document.getElementById('btnCleanAllInNovel');
+            if (!confirm('ต้องการให้ AI เริ่มเกลาภาษาตอนทั้งหมดในเรื่องนี้ทันทีหรือไม่?')) return;
+            if (btn) {{
+                btn.disabled = true;
+                btn.textContent = '⏳ กำลังส่งคำสั่ง...';
+            }}
+            try {{
+                const res = await fetch(`/api/cleaner/clean-novel/${{novelId}}`, {{ method: 'POST' }});
+                const data = await res.json();
+                alert(data.message || 'เริ่มเกลาภาษาในพื้นหลังแล้ว');
+                if (btn) btn.textContent = '🚀 กำลังเกลาภาษาในพื้นหลัง...';
+            }} catch (e) {{
+                alert('เกิดข้อผิดพลาด: ' + e.message);
+                if (btn) {{
+                    btn.disabled = false;
+                    btn.textContent = '✨ สั่ง AI เกลาภาษานิยายเรื่องนี้';
+                }}
+            }}
+        }}
+
         setInterval(updateTocCleaner, 4000);
         updateTocCleaner();
 
@@ -376,12 +404,16 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
     is_dl = bool(current_chapter.get("is_downloaded"))
     is_cl = bool(current_chapter.get("is_cleaned"))
 
+    novel_id = novel.get("id", 0)
     if not is_dl:
         status_bar_html = '<div class="chapter-status-pill badge-not-ready"><span>⚠️</span> ตอนนี้ยังไม่พร้อมอ่าน (ยังไม่ได้ดาวน์โหลดเนื้อหา)</div>'
     elif is_cl:
-        status_bar_html = '<div class="chapter-status-pill badge-cleaned"><span>✨</span> ตอนนี้ผ่านการเกลาภาษาและจัดย่อหน้าโดย AI แล้ว</div>'
+        status_bar_html = '<div id="chapStatusPill" class="chapter-status-pill badge-cleaned"><span>✨</span> ตอนนี้ผ่านการเกลาภาษาและจัดย่อหน้าโดย AI แล้ว</div>'
     else:
-        status_bar_html = '<div class="chapter-status-pill badge-raw"><span>⏳</span> ตอนนี้เป็นฉบับดิบ (ระบบกำลังจัดคิวเกลาภาษาด้วย AI ในพื้นหลัง)</div>'
+        status_bar_html = f'''<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom: 20px;">
+            <div id="chapStatusPill" class="chapter-status-pill badge-raw" style="margin-bottom:0;"><span>⏳</span> ตอนนี้เป็นฉบับดิบ (รอเกลาภาษา)</div>
+            <button id="btnCleanCurrentChap" class="btn-control" onclick="cleanCurrentChapter({novel_id}, {chap_num})" style="background:#7c3aed; color:#fff; border-color:#6d28d9; font-weight:600; cursor:pointer;" title="สั่งให้ AI เกลาภาษาบทนี้ทันที">✨ เกลาบทนี้ทันทีด้วย AI</button>
+        </div>'''
 
     # Content paragraphs
     if current_chapter.get("is_cleaned") and current_chapter.get("content_html"):
@@ -485,6 +517,43 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
             {'if (e.key === "ArrowLeft") window.location.href = "' + prev_url + '";' if prev_url else ''}
             {'if (e.key === "ArrowRight") window.location.href = "' + next_url + '";' if next_url else ''}
         }});
+
+        // Dynamic Chapter Clean
+        async function cleanCurrentChapter(novelId, chapNum) {{
+            const btn = document.getElementById('btnCleanCurrentChap');
+            const pill = document.getElementById('chapStatusPill');
+            const readingText = document.getElementById('readingText');
+            if (btn) {{
+                btn.disabled = true;
+                btn.textContent = '⏳ กำลังเกลาบทนี้ด้วย AI...';
+            }}
+            try {{
+                const res = await fetch(`/api/cleaner/clean-chapter/${{novelId}}/${{chapNum}}`, {{ method: 'POST' }});
+                const data = await res.json();
+                if (data.status === 'ok' && data.content_html) {{
+                    readingText.innerHTML = data.content_html;
+                    if (pill) {{
+                        pill.className = 'chapter-status-pill badge-cleaned';
+                        pill.innerHTML = '<span>✨</span> ตอนนี้ผ่านการเกลาภาษาและจัดย่อหน้าโดย AI แล้ว';
+                    }}
+                    if (btn) {{
+                        btn.style.display = 'none';
+                    }}
+                }} else {{
+                    alert(data.detail || data.message || 'ไม่สามารถเกลาบทนี้ได้');
+                    if (btn) {{
+                        btn.disabled = false;
+                        btn.textContent = '✨ เกลาบทนี้ทันทีด้วย AI';
+                    }}
+                }}
+            }} catch (e) {{
+                alert('เกิดข้อผิดพลาดในการเกลาบทนี้: ' + e.message);
+                if (btn) {{
+                    btn.disabled = false;
+                    btn.textContent = '✨ เกลาบทนี้ทันทีด้วย AI';
+                }}
+            }}
+        }}
 
         // Initialization
         (function() {{

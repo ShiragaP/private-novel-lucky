@@ -321,6 +321,55 @@ def toggle_cleaner():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/cleaner/clean-novel/{novel_id}")
+def clean_novel_endpoint(novel_id: int, background_tasks: BackgroundTasks):
+    """
+    Manually trigger cleaning for all uncleaned chapters of a specific novel.
+    """
+    try:
+        from src.llm_cleaner import LLMChapterCleaner
+        cleaner = LLMChapterCleaner()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Vertex AI not configured: {str(e)}")
+
+    novel = db.get_novel_by_id(novel_id)
+    if not novel:
+        raise HTTPException(status_code=404, detail="Novel not found")
+
+    def _run():
+        print(f"[LLM Cleaner] Manual clean initiated for Novel ID {novel_id} ({novel.get('title')})...", flush=True)
+        cleaner.clean_novel(novel_id=novel_id, max_workers=2, force=True)
+
+    background_tasks.add_task(_run)
+    return {"status": "ok", "message": f"เริ่มเกลาภาษานิยาย ID {novel_id} ในพื้นหลังแล้ว"}
+
+@app.post("/api/cleaner/clean-chapter/{novel_id}/{chapter_num}")
+def clean_single_chapter_endpoint(novel_id: int, chapter_num: int):
+    """
+    Manually trigger cleaning for a single chapter immediately.
+    """
+    try:
+        from src.llm_cleaner import LLMChapterCleaner
+        cleaner = LLMChapterCleaner()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Vertex AI not configured: {str(e)}")
+
+    chap = db.get_chapter(novel_id, chapter_num)
+    if not chap:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    chap_id = chap["id"]
+    success = cleaner.clean_chapter(chap_id, force=True)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to clean chapter")
+
+    updated = db.get_chapter(novel_id, chapter_num)
+    return {
+        "status": "ok",
+        "chapter_num": chapter_num,
+        "content_html": updated.get("content_html", "")
+    }
+
 # Dynamic PostgreSQL Reader & TOC Routes
 @app.get("/novel/{slug}", response_class=HTMLResponse)
 def view_novel_toc(slug: str):

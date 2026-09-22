@@ -156,11 +156,11 @@ class LLMChapterCleaner:
         print(f"[LLM Cleaner] Warning: All {max_retries} attempts failed to produce cleaned text. Falling back to original text.", flush=True)
         return CleanResult(text=raw_text)
 
-    def clean_chapter(self, chapter_id: int) -> bool:
+    def clean_chapter(self, chapter_id: int, force: bool = False) -> bool:
         """
         Cleans a single chapter by ID and updates PostgreSQL.
         """
-        if auto_cleaner_controller.is_paused:
+        if not force and auto_cleaner_controller.is_paused:
             return False
 
         conn = self.db._get_conn()
@@ -235,12 +235,13 @@ class LLMChapterCleaner:
         finally:
             self.db._release_conn(conn)
 
-    def clean_novel(self, novel_id: int, start_chap: Optional[int] = None, end_chap: Optional[int] = None, max_workers: int = 3):
+    def clean_novel(self, novel_id: int, start_chap: Optional[int] = None, end_chap: Optional[int] = None, max_workers: int = 3, force: bool = True):
         conn = self.db._get_conn()
         try:
             cur = conn.cursor()
             ph = "%s" if self.db.is_postgres else "?"
-            query = f"SELECT id, chapter_num, title FROM chapters WHERE novel_id = {ph}"
+            cond = "(is_cleaned = FALSE OR is_cleaned IS NULL)" if self.db.is_postgres else "(is_cleaned = 0 OR is_cleaned IS NULL)"
+            query = f"SELECT id, chapter_num, title FROM chapters WHERE novel_id = {ph} AND {cond} AND content_text IS NOT NULL AND content_text != ''"
             params = [novel_id]
             if start_chap:
                 query += f" AND chapter_num >= {ph}"
@@ -255,10 +256,14 @@ class LLMChapterCleaner:
             self.db._release_conn(conn)
 
         total = len(chapters)
-        print(f"\n[LLM Cleaner] Found {total} chapters to clean for Novel ID {novel_id} (Workers: {max_workers})...", flush=True)
+        if total == 0:
+            print(f"[LLM Cleaner] No uncleaned chapters found for Novel ID {novel_id}.", flush=True)
+            return
+
+        print(f"\n[LLM Cleaner] Found {total} uncleaned chapters for Novel ID {novel_id} (Workers: {max_workers})...", flush=True)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_chap = {executor.submit(self.clean_chapter, ch[0]): ch for ch in chapters}
+            future_to_chap = {executor.submit(self.clean_chapter, ch[0], force=force): ch for ch in chapters}
             completed = 0
             for future in as_completed(future_to_chap):
                 ch = future_to_chap[future]
@@ -274,7 +279,8 @@ class LLMChapterCleaner:
 
 class AutoCleanerController:
     def __init__(self):
-        self.is_paused = False
+        # Default is PAUSED as requested by user
+        self.is_paused = True
         self.cleaner: Optional[LLMChapterCleaner] = None
         self.lock = threading.Lock()
         self.is_running = False
@@ -287,7 +293,7 @@ class AutoCleanerController:
     def resume(self):
         with self.lock:
             self.is_paused = False
-        print("[LLM Auto-Cleaner] ▶️ Resumed by user.", flush=True)
+        print("[LLM Auto-Cleaner] ▶️ Resumed by user (will clean pinned novels only).", flush=True)
 
     def get_status(self) -> Dict[str, Any]:
         with self.lock:
@@ -350,7 +356,7 @@ def start_background_auto_cleaner(workers: int = 2):
             print(f"[LLM Auto-Cleaner] Failed to initialize cleaner: {e}", flush=True)
             return
 
-        print(f"[LLM Auto-Cleaner] Background auto-cleaner active (Model: {cleaner.model_name}, Workers: {workers}).", flush=True)
+        print(f"[LLM Auto-Cleaner] Background auto-cleaner active (Default: PAUSED, Model: {cleaner.model_name}, Workers: {workers}).", flush=True)
 
         while True:
             # Check pause status
@@ -364,32 +370,36 @@ def start_background_auto_cleaner(workers: int = 2):
                 cur = conn.cursor()
                 if cleaner.db.is_postgres:
                     cur.execute("""
-                        SELECT id, novel_id, chapter_num, title 
-                        FROM chapters 
-                        WHERE (is_cleaned = FALSE OR is_cleaned IS NULL) 
-                          AND content_text IS NOT NULL AND content_text != ''
-                        ORDER BY novel_id ASC, chapter_num ASC
+                        SELECT c.id, c.novel_id, c.chapter_num, c.title 
+                        FROM chapters c
+                        JOIN novels n ON c.novel_id = n.id
+                        WHERE n.is_pinned = TRUE
+                          AND (c.is_cleaned = FALSE OR c.is_cleaned IS NULL) 
+                          AND c.content_text IS NOT NULL AND c.content_text != ''
+                        ORDER BY c.novel_id ASC, c.chapter_num ASC
                         LIMIT 20;
                     """)
                 else:
                     cur.execute("""
-                        SELECT id, novel_id, chapter_num, title 
-                        FROM chapters 
-                        WHERE (is_cleaned = 0 OR is_cleaned IS NULL) 
-                          AND content_text IS NOT NULL AND content_text != ''
-                        ORDER BY novel_id ASC, chapter_num ASC
+                        SELECT c.id, c.novel_id, c.chapter_num, c.title 
+                        FROM chapters c
+                        JOIN novels n ON c.novel_id = n.id
+                        WHERE n.is_pinned = 1
+                          AND (c.is_cleaned = 0 OR c.is_cleaned IS NULL) 
+                          AND c.content_text IS NOT NULL AND c.content_text != ''
+                        ORDER BY c.novel_id ASC, c.chapter_num ASC
                         LIMIT 20;
                     """)
                 batch = cur.fetchall()
             except Exception as e:
-                print(f"[LLM Auto-Cleaner] Error querying uncleaned chapters: {e}", flush=True)
+                print(f"[LLM Auto-Cleaner] Error querying uncleaned chapters for pinned novels: {e}", flush=True)
                 batch = []
             finally:
                 cleaner.db._release_conn(conn)
 
             if not batch:
                 auto_cleaner_controller.is_running = False
-                # No uncleaned chapters right now, sleep and poll every 60 seconds (wake up quickly if paused)
+                # No uncleaned chapters in pinned novels right now, sleep and poll every 60 seconds (wake up quickly if paused)
                 for _ in range(60):
                     if auto_cleaner_controller.is_paused:
                         break
@@ -400,7 +410,7 @@ def start_background_auto_cleaner(workers: int = 2):
                 continue
 
             auto_cleaner_controller.is_running = True
-            print(f"[LLM Auto-Cleaner] Processing batch of {len(batch)} uncleaned chapters...", flush=True)
+            print(f"[LLM Auto-Cleaner] Processing batch of {len(batch)} uncleaned chapters from pinned novels...", flush=True)
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {executor.submit(cleaner.clean_chapter, ch[0]): ch for ch in batch}
                 for f in as_completed(futures):
