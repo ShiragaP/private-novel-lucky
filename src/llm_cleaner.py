@@ -14,8 +14,17 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google import genai
+from google.genai import types
 
 from .db import DatabaseManager
+
+SAFETY_SETTINGS = [
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+]
 
 SYSTEM_INSTRUCTION = """คุณเป็นผู้เชี่ยวชาญการจัดรูปแบบและพิสูจน์อักษรนิยายไทย (Professional Thai Novel Typesetter / Proofreader)
 หน้าที่ของคุณคือรับข้อความนิยายไทยที่ถูกระบบตัดบรรทัด (Line-wrap) ผิดจังหวะกลางประโยคหรือกลางคำศัพท์ มาจัดรวมย่อหน้าให้ถูกต้องและสละสลวยตามมาตรฐานการจัดพิมพ์นิยาย
@@ -70,21 +79,36 @@ class LLMChapterCleaner:
                 resp = self.client.models.generate_content(
                     model=self.model_name,
                     contents=prompt,
-                    config={
-                        "system_instruction": SYSTEM_INSTRUCTION,
-                        "temperature": 0.1,
-                    }
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION,
+                        temperature=0.1,
+                        safety_settings=SAFETY_SETTINGS,
+                    )
                 )
-                cleaned = resp.text.strip()
+                cleaned = None
+                if hasattr(resp, "text") and resp.text:
+                    cleaned = resp.text.strip()
+                elif hasattr(resp, "candidates") and resp.candidates:
+                    cand = resp.candidates[0]
+                    if hasattr(cand, "content") and hasattr(cand.content, "parts") and cand.content.parts:
+                        parts = [p.text for p in cand.content.parts if getattr(p, "text", None)]
+                        if parts:
+                            cleaned = "".join(parts).strip()
+                    if not cleaned and hasattr(cand, "finish_reason"):
+                        print(f"[LLM Cleaner] Candidate empty on attempt {attempt}/{max_retries}. finish_reason: {cand.finish_reason}", flush=True)
+
                 if cleaned:
                     return cleaned
+                else:
+                    print(f"[LLM Cleaner] Attempt {attempt}/{max_retries} returned empty response. Retrying...", flush=True)
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
             except Exception as e:
-                print(f"[LLM Cleaner] Error on attempt {attempt}/{max_retries}: {e}")
+                print(f"[LLM Cleaner] Error on attempt {attempt}/{max_retries}: {e}", flush=True)
                 if attempt < max_retries:
                     time.sleep(2 * attempt)
-                else:
-                    raise
 
+        print(f"[LLM Cleaner] Warning: All {max_retries} attempts failed to produce cleaned text. Falling back to original text.", flush=True)
         return raw_text
 
     def clean_chapter(self, chapter_id: int) -> bool:
