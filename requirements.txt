@@ -9,3 +9,5 @@ brotli>=1.1.0
 pydantic>=2.6.0
 python-multipart>=0.0.9
 pythainlp>=5.0.0
+google-genai>=2.0.0
+google-auth>=2.0.0

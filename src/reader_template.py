@@ -309,11 +309,14 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
         options_html.append(f'<option value="/read/{slug}/{c_num}"{selected}>{title_text}</option>')
     dropdown_options = "\n".join(options_html)
 
-    # Content paragraphs (Dynamic Thai novel formatting)
-    content_html = format_thai_novel_content(
-        current_chapter.get("content_html", ""),
-        current_chapter.get("content_text", "")
-    )
+    # Content paragraphs
+    if current_chapter.get("is_cleaned") and current_chapter.get("content_html"):
+        content_html = current_chapter["content_html"]
+    else:
+        content_html = format_thai_novel_content(
+            current_chapter.get("content_html", ""),
+            current_chapter.get("content_text", "")
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="th" data-theme="light">

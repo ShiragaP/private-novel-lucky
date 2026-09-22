@@ -1,0 +1,190 @@
+import os
+import sys
+import json
+import time
+import base64
+import argparse
+sys.stdout.reconfigure(encoding='utf-8')
+from typing import Optional, Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google import genai
+
+from .db import DatabaseManager
+
+SYSTEM_INSTRUCTION = """คุณเป็นผู้เชี่ยวชาญการจัดรูปแบบและพิสูจน์อักษรนิยายไทย (Professional Thai Novel Typesetter / Proofreader)
+หน้าที่ของคุณคือรับข้อความนิยายไทยที่ถูกระบบตัดบรรทัด (Line-wrap) ผิดจังหวะกลางประโยคหรือกลางคำศัพท์ มาจัดรวมย่อหน้าให้ถูกต้องและสละสลวยตามมาตรฐานการจัดพิมพ์นิยาย
+
+กฎเหล็กที่ต้องปฏิบัติตามอย่างเคร่งครัด:
+1. ห้ามแก้ไข ดัดแปลง ตัดทอน หรือแต่งเติมเนื้อเรื่องเด็ดขาด (คงคำศัพท์และสำนวนเดิมของผู้เขียนไว้ 100%)
+2. เชื่อมต่อคำหรือประโยคที่ถูกตัดท่อนกลางคันให้กลายเป็นประโยคสมบูรณ์ เช่น:
+   - "เด็กคน" กับ "นี้" -> "เด็กคนนี้"
+   - "สิ่งมีชีวิตใน" กับ "ตำนาน" -> "สิ่งมีชีวิตในตำนาน"
+   - "ทั้งเก่า" กับ "และใหม่" -> "ทั้งเก่าและใหม่"
+   - "คลืบคลานมา" กับ "ใกล้" -> "คลืบคลานมาใกล้"
+3. แยกบทสนทนา:
+   - บทสนทนาที่มีเครื่องหมายคำพูด (“...”) ของแต่ละบุคคล ต้องอยู่คนละย่อหน้าเสมอ ห้ามนำมารวมกันเด็ดขาด
+   - หากมีบทสนทนา 2 คนอยู่ติดกันในบรรทัดเดียว ให้ตัดแบ่งขึ้นบรรทัดใหม่
+4. ย่อหน้าบรรยาย: ประโยคบรรยายที่ต่อเนื่องกันให้รวมเป็นย่อหน้าเดียวกัน
+5. ให้ส่งออกเฉพาะเนื้อหานิยายที่จัดย่อหน้าแล้ว แต่ละย่อหน้าคั่นด้วยการขึ้นบรรทัดใหม่ 2 ครั้ง (\\n\\n) โดยไม่ต้องมีคำทักทายหรือคำอธิบายเพิ่มเติมใดๆ"""
+
+class LLMChapterCleaner:
+    def __init__(self):
+        self.project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        self.location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
+        self.model_name = os.environ.get("AI_MODEL", "gemini-3.5-flash-lite")
+        self.b64_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_BASE64", "")
+        
+        if not self.project or not self.b64_creds:
+            raise ValueError("[LLM Cleaner] Missing GOOGLE_CLOUD_PROJECT or GOOGLE_APPLICATION_CREDENTIALS_BASE64 in .env")
+
+        creds_json = base64.b64decode(self.b64_creds).decode("utf-8")
+        info = json.loads(creds_json)
+        self.creds = Credentials.from_authorized_user_info(info, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        self.creds.refresh(Request())
+
+        self.client = genai.Client(
+            vertexai=True,
+            project=self.project,
+            location=self.location,
+            credentials=self.creds
+        )
+        self.db = DatabaseManager()
+
+    def clean_text(self, raw_text: str, max_retries: int = 3) -> str:
+        """
+        Calls Gemini Flash on Vertex AI to clean broken line wraps in Thai novel text.
+        """
+        if not raw_text or not raw_text.strip():
+            return ""
+
+        prompt = f"กรุณาจัดย่อหน้าข้อความนิยายต่อไปนี้ให้ถูกต้องตามกฎ:\n\n{raw_text.strip()}"
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                resp = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config={
+                        "system_instruction": SYSTEM_INSTRUCTION,
+                        "temperature": 0.1,
+                    }
+                )
+                cleaned = resp.text.strip()
+                if cleaned:
+                    return cleaned
+            except Exception as e:
+                print(f"[LLM Cleaner] Error on attempt {attempt}/{max_retries}: {e}")
+                if attempt < max_retries:
+                    time.sleep(2 * attempt)
+                else:
+                    raise
+
+        return raw_text
+
+    def clean_chapter(self, chapter_id: int) -> bool:
+        """
+        Cleans a single chapter by ID and updates PostgreSQL.
+        """
+        conn = self.db._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT novel_id, chapter_num, title, content_text 
+                FROM chapters 
+                WHERE id = %s;
+            """, (chapter_id,))
+            row = cur.fetchone()
+            if not row or not row[3]:
+                return False
+
+            novel_id, c_num, title, raw_text = row
+            t0 = time.time()
+            cleaned_text = self.clean_text(raw_text)
+
+            # Generate clean HTML paragraphs
+            paras = [p.strip() for p in cleaned_text.split("\n") if p.strip()]
+            cleaned_html = "\n".join(f"<p>{p}</p>" for p in paras)
+
+            cur.execute("""
+                UPDATE chapters 
+                SET content_text = %s,
+                    content_html = %s,
+                    is_cleaned = TRUE,
+                    cleaned_at = CURRENT_TIMESTAMP
+                WHERE id = %s;
+            """, (cleaned_text, cleaned_html, chapter_id))
+            conn.commit()
+            dur = time.time() - t0
+            print(f"  [OK] Cleaned Chap {c_num}: {title} ({len(paras)} paras, {dur:.2f}s)")
+            return True
+        finally:
+            self.db._release_conn(conn)
+
+    def clean_novel(self, novel_id: int, start_chap: Optional[int] = None, end_chap: Optional[int] = None, max_workers: int = 3):
+        conn = self.db._get_conn()
+        try:
+            cur = conn.cursor()
+            query = "SELECT id, chapter_num, title FROM chapters WHERE novel_id = %s"
+            params = [novel_id]
+            if start_chap:
+                query += " AND chapter_num >= %s"
+                params.append(start_chap)
+            if end_chap:
+                query += " AND chapter_num <= %s"
+                params.append(end_chap)
+            query += " ORDER BY chapter_num ASC;"
+            cur.execute(query, tuple(params))
+            chapters = cur.fetchall()
+        finally:
+            self.db._release_conn(conn)
+
+        total = len(chapters)
+        print(f"\n[LLM Cleaner] Found {total} chapters to clean for Novel ID {novel_id} (Workers: {max_workers})...")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_chap = {executor.submit(self.clean_chapter, ch[0]): ch for ch in chapters}
+            completed = 0
+            for future in as_completed(future_to_chap):
+                ch = future_to_chap[future]
+                completed += 1
+                try:
+                    res = future.result()
+                    pct = (completed / total) * 100
+                    print(f"[{completed}/{total}] ({pct:.1f}%) Chapter {ch[1]} done.")
+                except Exception as e:
+                    print(f"[{completed}/{total}] ERROR on Chapter {ch[1]}: {e}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Clean Thai novel chapters using Google Cloud Vertex AI (Gemini Flash)")
+    parser.add_argument("--novel-id", type=int, default=2, help="Novel ID to clean (default: 2)")
+    parser.add_argument("--chapter", type=int, default=None, help="Clean single chapter number")
+    parser.add_argument("--start", type=int, default=None, help="Start chapter number")
+    parser.add_argument("--end", type=int, default=None, help="End chapter number")
+    parser.add_argument("--workers", type=int, default=3, help="Concurrent workers (default: 3)")
+    args = parser.parse_args()
+
+    cleaner = LLMChapterCleaner()
+    if args.chapter:
+        conn = cleaner.db._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM chapters WHERE novel_id = %s AND chapter_num = %s;", (args.novel_id, args.chapter))
+            row = cur.fetchone()
+            if row:
+                print(f"[LLM Cleaner] Cleaning single chapter: Novel {args.novel_id}, Chapter {args.chapter}...")
+                cleaner.clean_chapter(row[0])
+            else:
+                print(f"Chapter {args.chapter} not found for Novel {args.novel_id}")
+        finally:
+            cleaner.db._release_conn(conn)
+    else:
+        cleaner.clean_novel(args.novel_id, start_chap=args.start, end_chap=args.end, max_workers=args.workers)
+
+if __name__ == "__main__":
+    main()
