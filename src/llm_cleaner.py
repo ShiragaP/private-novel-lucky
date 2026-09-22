@@ -160,6 +160,75 @@ class LLMChapterCleaner:
                 except Exception as e:
                     print(f"[{completed}/{total}] ERROR on Chapter {ch[1]}: {e}")
 
+def start_background_auto_cleaner(workers: int = 2):
+    """
+    Spawns a background thread that continuously finds uncleaned chapters
+    and processes them with Vertex AI LLM in the background.
+    """
+    import threading
+
+    b64_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_BASE64", "")
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+    auto_enabled = os.environ.get("AUTO_CLEAN_ON_STARTUP", "true").lower() in ("true", "1", "yes")
+
+    if not auto_enabled:
+        print("[LLM Auto-Cleaner] AUTO_CLEAN_ON_STARTUP is disabled.")
+        return
+
+    if not b64_creds or not project:
+        print("[LLM Auto-Cleaner] Vertex AI credentials not configured in environment. Skipping auto-cleaning.")
+        return
+
+    def _worker_loop():
+        # Short initial delay to let server fully start up
+        time.sleep(5)
+        try:
+            cleaner = LLMChapterCleaner()
+        except Exception as e:
+            print(f"[LLM Auto-Cleaner] Failed to initialize cleaner: {e}")
+            return
+
+        print(f"[LLM Auto-Cleaner] Background auto-cleaner active (Model: {cleaner.model_name}, Workers: {workers}).")
+
+        while True:
+            conn = cleaner.db._get_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT id, novel_id, chapter_num, title 
+                    FROM chapters 
+                    WHERE is_cleaned = FALSE AND content_text IS NOT NULL AND content_text != ''
+                    ORDER BY novel_id ASC, chapter_num ASC
+                    LIMIT 20;
+                """)
+                batch = cur.fetchall()
+            except Exception as e:
+                print(f"[LLM Auto-Cleaner] Error querying uncleaned chapters: {e}")
+                batch = []
+            finally:
+                cleaner.db._release_conn(conn)
+
+            if not batch:
+                # No uncleaned chapters right now, sleep and poll every 60 seconds
+                time.sleep(60)
+                continue
+
+            print(f"[LLM Auto-Cleaner] Processing batch of {len(batch)} uncleaned chapters...")
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(cleaner.clean_chapter, ch[0]): ch for ch in batch}
+                for f in as_completed(futures):
+                    ch = futures[f]
+                    try:
+                        f.result()
+                    except Exception as e:
+                        print(f"[LLM Auto-Cleaner] Error cleaning Novel {ch[1]} Chap {ch[2]}: {e}")
+                        time.sleep(5)  # small pause if rate-limited
+
+            time.sleep(2)  # small pause between batches
+
+    t = threading.Thread(target=_worker_loop, daemon=True, name="LLMAutoCleanerThread")
+    t.start()
+
 def main():
     parser = argparse.ArgumentParser(description="Clean Thai novel chapters using Google Cloud Vertex AI (Gemini Flash)")
     parser.add_argument("--novel-id", type=int, default=2, help="Novel ID to clean (default: 2)")

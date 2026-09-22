@@ -31,6 +31,12 @@ services:
       PORT: ${PORT:-21041}
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-novel}:${POSTGRES_PASSWORD:-your_strong_password_here_SEP2026}@novel-postgres:5432/${POSTGRES_DB:-novel_db}}
       APP_PASSWORD: ${APP_PASSWORD:-novel1234}
+      AI_PROVIDER_MODE: ${AI_PROVIDER_MODE:-gemini_vertex}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-global}
+      AI_MODEL: ${AI_MODEL:-gemini-3.5-flash-lite}
+      GOOGLE_APPLICATION_CREDENTIALS_BASE64: ${GOOGLE_APPLICATION_CREDENTIALS_BASE64:-}
+      AUTO_CLEAN_ON_STARTUP: ${AUTO_CLEAN_ON_STARTUP:-true}
     depends_on:
       novel-postgres:
         condition: service_healthy

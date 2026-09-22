@@ -103,6 +103,13 @@ def on_startup():
     except Exception as e:
         print(f"[Server] Error recovering interrupted jobs on startup: {e}")
 
+    # Start auto-cleaning uncleaned chapters in background using Google Cloud Vertex AI
+    try:
+        from src.llm_cleaner import start_background_auto_cleaner
+        start_background_auto_cleaner(workers=2)
+    except Exception as e:
+        print(f"[Server] LLM background auto-cleaner startup error: {e}")
+
 class DownloadRequest(BaseModel):
     url: str
 
