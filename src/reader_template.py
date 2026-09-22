@@ -1,0 +1,264 @@
+import html
+from typing import List, Dict, Any, Optional
+
+def clean_chapter_title(title: str, novel_title: str = "") -> str:
+    if not title:
+        return ""
+    if " - " in title:
+        parts = title.split(" - ")
+        for part in parts[1:]:
+            if "บทที่" in part:
+                return part.strip()
+        return parts[-1].strip()
+    if novel_title and title.startswith(novel_title):
+        title = title[len(novel_title):].lstrip(" -:\t")
+    return title.strip()
+
+def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> str:
+    novel_title = html.escape(novel.get("title", ""))
+    slug = novel.get("slug", "")
+    cover_image = novel.get("cover_image", "")
+    if cover_image and cover_image.startswith("http"):
+        cover_image = f"/api/proxy/image?url={html.escape(cover_image)}"
+    elif not cover_image:
+        cover_image = "/static/default_cover.jpg"
+
+    desc = html.escape(novel.get("description", ""))
+    total = len(chapters)
+    downloaded = sum(1 for ch in chapters if ch.get("is_downloaded"))
+
+    chapter_items = []
+    for ch in chapters:
+        c_num = ch["chapter_num"]
+        clean_title = html.escape(clean_chapter_title(ch.get("title", f"บทที่ {c_num}"), novel.get("title", "")))
+        is_dl = ch.get("is_downloaded")
+        badge = "" if is_dl else " <span style='color:#e53e3e;font-size:0.8em;'>[ยังไม่โหลด]</span>"
+        chapter_items.append(f'<a href="/read/{slug}/{c_num}" class="chapter-link" data-title="{clean_title}">{clean_title}{badge}</a>')
+
+    chapter_list_html = "\n".join(chapter_items)
+
+    first_chap_link = f"/read/{slug}/1" if chapters else "#"
+
+    return f"""<!DOCTYPE html>
+<html lang="th" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{novel_title} - สารบัญ • PeoShi Novel Site</title>
+    <link rel="stylesheet" href="/static/reader.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="reader-header">
+        <div class="header-inner">
+            <a href="/" class="novel-title-link">
+                <span>📚</span> PeoShi Novel Site
+            </a>
+            <div class="reader-settings">
+                <a href="/" class="btn-control" style="font-weight:600;">🏠 หน้าหลักคลังนิยาย</a>
+                <a href="{first_chap_link}" class="btn-control">📖 เริ่มอ่านบทที่ 1</a>
+                <select class="theme-selector" onchange="setTheme(this.value)" id="themeSelector">
+                    <option value="light">☀️ สว่าง (Light)</option>
+                    <option value="sepia">📜 ถนอมสายตา (Sepia)</option>
+                    <option value="dark">🌙 มืด (Dark)</option>
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <main class="reader-container">
+        <section class="toc-card">
+            <div class="toc-header">
+                {'<img src="' + cover_image + '" alt="' + novel_title + '" class="toc-cover">' if cover_image else ''}
+                <div class="toc-info">
+                    <h1>{novel_title}</h1>
+                    <p style="color:var(--accent-color); font-weight:600;">
+                        ดาวน์โหลดแล้ว {downloaded} จาก {total} ตอน (Render จาก PostgreSQL)
+                    </p>
+                    <p class="toc-desc">{desc}</p>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <input type="text" id="chapterSearch" class="toc-search" placeholder="🔍 ค้นหาตอน เช่น 'บทที่ 1' หรือคำค้นหาในชื่อตอน..." oninput="filterChapters()">
+            
+            <div class="chapter-grid" id="chapterGrid">
+                {chapter_list_html}
+            </div>
+        </section>
+    </main>
+
+    <footer class="reader-footer">
+        <p>PeoShi Novel Site • Rendered from PostgreSQL • ปราศจากโฆษณา</p>
+    </footer>
+
+    <script>
+        function setTheme(theme) {{
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('novel_reader_theme', theme);
+            const selector = document.getElementById('themeSelector');
+            if (selector) selector.value = theme;
+        }}
+
+        function filterChapters() {{
+            const input = document.getElementById('chapterSearch').value.toLowerCase();
+            const links = document.querySelectorAll('.chapter-link');
+            links.forEach(link => {{
+                const title = (link.getAttribute('data-title') || link.textContent).toLowerCase();
+                if (title.includes(input)) {{
+                    link.style.display = '';
+                }} else {{
+                    link.style.display = 'none';
+                }}
+            }});
+        }}
+
+        (function() {{
+            const savedTheme = localStorage.getItem('novel_reader_theme') || 'light';
+            setTheme(savedTheme);
+        }})();
+    </script>
+</body>
+</html>
+"""
+
+def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], all_chapters: List[Dict[str, Any]]) -> str:
+    raw_novel_title = novel.get("title", "")
+    novel_title = html.escape(raw_novel_title)
+    slug = novel.get("slug", "")
+    chap_num = current_chapter["chapter_num"]
+    clean_chap_title = html.escape(clean_chapter_title(current_chapter.get("title", f"บทที่ {chap_num}"), raw_novel_title))
+
+    # Navigation targets
+    chap_nums = [c["chapter_num"] for c in all_chapters]
+    prev_num = None
+    next_num = None
+    if chap_num in chap_nums:
+        idx = chap_nums.index(chap_num)
+        if idx > 0:
+            prev_num = chap_nums[idx - 1]
+        if idx < len(chap_nums) - 1:
+            next_num = chap_nums[idx + 1]
+
+    prev_url = f"/read/{slug}/{prev_num}" if prev_num is not None else None
+    next_url = f"/read/{slug}/{next_num}" if next_num is not None else None
+    toc_url = f"/novel/{slug}"
+
+    # Dropdown options
+    options_html = []
+    for ch in all_chapters:
+        c_num = ch["chapter_num"]
+        selected = ' selected' if c_num == chap_num else ''
+        title_text = html.escape(clean_chapter_title(ch.get("title", f"บทที่ {c_num}"), raw_novel_title))
+        options_html.append(f'<option value="/read/{slug}/{c_num}"{selected}>{title_text}</option>')
+    dropdown_options = "\n".join(options_html)
+
+    # Content paragraphs
+    content_html = current_chapter.get("content_html", "")
+    if not content_html and current_chapter.get("content_text"):
+        paras = current_chapter["content_text"].split("\n\n")
+        content_html = "\n".join(f"<p>{html.escape(p)}</p>" for p in paras if p.strip())
+
+    return f"""<!DOCTYPE html>
+<html lang="th" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{clean_chap_title} - {novel_title} • PeoShi Novel Site</title>
+    <link rel="stylesheet" href="/static/reader.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="reader-header">
+        <div class="header-inner">
+            <a href="{toc_url}" class="novel-title-link" title="กลับไปหน้าสารบัญ">
+                <span>📚</span> {novel_title}
+            </a>
+            <div class="reader-settings">
+                <button class="btn-control" onclick="adjustFontSize(-1)" title="ลดขนาดตัวอักษร">A-</button>
+                <button class="btn-control" onclick="adjustFontSize(1)" title="เพิ่มขนาดตัวอักษร">A+</button>
+                <select class="theme-selector" onchange="setTheme(this.value)" id="themeSelector">
+                    <option value="light">☀️ สว่าง (Light)</option>
+                    <option value="sepia">📜 ถนอมสายตา (Sepia)</option>
+                    <option value="dark">🌙 มืด (Dark)</option>
+                </select>
+                <a href="{toc_url}" class="btn-control">📑 สารบัญ</a>
+                <a href="/" class="btn-control" style="font-weight:600; color:var(--accent-color);">🏠 หน้าหลัก</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="reader-container">
+        <!-- Top Navigation -->
+        <nav class="nav-bar top">
+            {'<a href="' + prev_url + '" class="btn-control" id="prevBtnTop">⏮ ตอนก่อนหน้า</a>' if prev_url else '<span class="btn-control disabled">⏮ ตอนก่อนหน้า</span>'}
+            <select class="ep-dropdown" onchange="if (this.value) window.location.href=this.value;">
+                {dropdown_options}
+            </select>
+            {'<a href="' + next_url + '" class="btn-control" id="nextBtnTop">ตอนถัดไป ⏭</a>' if next_url else '<span class="btn-control disabled">ตอนถัดไป ⏭</span>'}
+        </nav>
+
+        <article class="chapter-content">
+            <h1 class="chapter-title">{clean_chap_title}</h1>
+            <div class="reading-text" id="readingText">
+                {content_html}
+            </div>
+        </article>
+
+        <!-- Bottom Navigation -->
+        <nav class="nav-bar bottom">
+            {'<a href="' + prev_url + '" class="btn-control" id="prevBtnBottom">⏮ ตอนก่อนหน้า</a>' if prev_url else '<span class="btn-control disabled">⏮ ตอนก่อนหน้า</span>'}
+            <select class="ep-dropdown" onchange="if (this.value) window.location.href=this.value;">
+                {dropdown_options}
+            </select>
+            {'<a href="' + next_url + '" class="btn-control" id="nextBtnBottom">ตอนถัดไป ⏭</a>' if next_url else '<span class="btn-control disabled">ตอนถัดไป ⏭</span>'}
+        </nav>
+    </main>
+
+    <footer class="reader-footer">
+        <p>PeoShi Novel Site • Rendered from PostgreSQL • ปราศจากโฆษณา</p>
+        <p style="margin-top:4px; font-size:0.8rem; opacity:0.8;">ใช้ปุ่มลูกศรซ้าย (←) และขวา (→) บนคีย์บอร์ดเพื่อเปลี่ยนตอนได้</p>
+    </footer>
+
+    <script>
+        // Theme Management
+        function setTheme(theme) {{
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('novel_reader_theme', theme);
+            const selector = document.getElementById('themeSelector');
+            if (selector) selector.value = theme;
+        }}
+
+        // Font Size Management
+        let currentFontSize = parseInt(localStorage.getItem('novel_font_size') || '18');
+        function applyFontSize(size) {{
+            currentFontSize = Math.max(14, Math.min(32, size));
+            document.documentElement.style.setProperty('--content-font-size', currentFontSize + 'px');
+            localStorage.setItem('novel_font_size', currentFontSize);
+        }}
+        function adjustFontSize(delta) {{
+            applyFontSize(currentFontSize + delta);
+        }}
+
+        // Keyboard Shortcuts
+        document.addEventListener('keydown', function(e) {{
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+            {'if (e.key === "ArrowLeft") window.location.href = "' + prev_url + '";' if prev_url else ''}
+            {'if (e.key === "ArrowRight") window.location.href = "' + next_url + '";' if next_url else ''}
+        }});
+
+        // Initialization
+        (function() {{
+            const savedTheme = localStorage.getItem('novel_reader_theme') || 'light';
+            setTheme(savedTheme);
+            applyFontSize(currentFontSize);
+        }})();
+    </script>
+</body>
+</html>
+"""

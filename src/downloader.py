@@ -10,7 +10,6 @@ import httpx
 from .db import DatabaseManager
 from .scraper import NovelScraper
 from .font_decoder import FontDecoder
-from .html_generator import HtmlGenerator
 
 def generate_slug(title: str, url: str) -> str:
     # Try extracting slug from URL first
@@ -216,10 +215,6 @@ class NovelDownloader:
                     content_html=content["content_html"]
                 )
                 
-                # Fetch fresh chapter row for html gen
-                fresh_ch = self.db.get_chapter(novel_id, chap_num)
-                if fresh_ch:
-                    html_gen.generate_chapter_page(novel, fresh_ch, all_chapters)
                 return True, chap_num, None
             except Exception as e:
                 return False, chap_num, str(e)
@@ -240,10 +235,6 @@ class NovelDownloader:
                                 self.active_jobs[novel_id]["current"] = f"บทที่ {chap_num}"
                     else:
                         safe_print(f"[Worker] Error downloading ch {chap_num} of novel {novel_id}: {repr(err)}")
-
-            # Re-fetch all chapters to generate complete Table of Contents
-            all_chapters_updated = self.db.get_chapters_for_novel(novel_id)
-            html_gen.generate_toc_page(novel, all_chapters_updated)
 
             # Check if there are still pending chapters before marking completed
             still_pending = self.db.get_pending_chapters(novel_id)

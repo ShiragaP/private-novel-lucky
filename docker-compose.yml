@@ -37,6 +37,7 @@ services:
     volumes:
       - ./novels:/app/novels
       - ./cache:/app/cache
+      - ./data:/app/data
       - ./ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง:/app/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง
     networks:
       - novel-network

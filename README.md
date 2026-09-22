@@ -1,4 +1,4 @@
-# Novel Cloner & Offline Reader (Novel-Lucky)
+# PeoShi Novel Site (Novel Cloner & Offline Reader)
 
 เครื่องมือโคลนและอ่านนิยายแปลแบบออฟไลน์จาก [novel-lucky.com](https://novel-lucky.com/) ปราศจากโฆษณา ตัวอักษรคมชัด รองรับการถอดรหัสฟอนต์พรางข้อความ (`LuckyNovelGlyphShield`) 100%
 
@@ -7,7 +7,7 @@
 ## 📂 โครงสร้างโฟลเดอร์
 
 ```
-d:\projects\novel-lucky\
+d:\projects\peoshi-novel-site\
 └── ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง\
     ├── index.html               # หน้าสารบัญ (Table of Contents) พร้อมระบบค้นหาตอน
     ├── style.css                # ดีไซน์สำหรับอ่าน สบายตา ปรับขนาดตัวอักษร และเปลี่ยนธีมได้

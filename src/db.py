@@ -4,13 +4,32 @@ import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
+def _load_env_file():
+    env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("\"'")
+                    if k not in os.environ:
+                        os.environ[k] = v
+        except Exception:
+            pass
+
+_load_env_file()
+
 class DatabaseManager:
     """
     Unified database manager supporting both PostgreSQL and SQLite.
-    Automatically connects to PostgreSQL if DATABASE_URL is set,
-    otherwise falls back to local SQLite.
+    Automatically connects to PostgreSQL if DATABASE_URL is set.
     """
     def __init__(self, database_url: Optional[str] = None):
+        _load_env_file()
         self.db_url = database_url or os.environ.get("DATABASE_URL")
         self.is_postgres = bool(self.db_url and (self.db_url.startswith("postgres://") or self.db_url.startswith("postgresql://")))
         self.lock = threading.Lock()
@@ -40,8 +59,7 @@ class DatabaseManager:
                         time.sleep(2)
             
             if not connected:
-                print(f"[Database] WARNING: Could not reach PostgreSQL. Falling back to local SQLite ({self.sqlite_path}).")
-                self.is_postgres = False
+                raise RuntimeError(f"[Database] ERROR: Could not connect to PostgreSQL ({self.db_url}): {self.postgres_error}")
 
         self.init_db()
 
@@ -210,17 +228,27 @@ class DatabaseManager:
             self._release_conn(conn)
 
     def get_novel_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
+        import urllib.parse
+        unquoted = urllib.parse.unquote(slug).strip()
         conn = self._get_conn()
         try:
             cur = conn.cursor()
             if self.is_postgres:
                 import psycopg2.extras
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cur.execute("SELECT * FROM novels WHERE slug = %s", (slug,))
+                cur.execute("""
+                    SELECT * FROM novels 
+                    WHERE slug = %s OR slug = %s OR title = %s OR title ILIKE %s
+                    LIMIT 1
+                """, (slug, unquoted, unquoted, f"%{unquoted}%"))
                 row = cur.fetchone()
                 return dict(row) if row else None
             else:
-                cur.execute("SELECT * FROM novels WHERE slug = ?", (slug,))
+                cur.execute("""
+                    SELECT * FROM novels 
+                    WHERE slug = ? OR slug = ? OR title = ? OR title LIKE ?
+                    LIMIT 1
+                """, (slug, unquoted, unquoted, f"%{unquoted}%"))
                 row = cur.fetchone()
                 return dict(row) if row else None
         finally:

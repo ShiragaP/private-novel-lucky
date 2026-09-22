@@ -19,7 +19,7 @@ from src.html_generator import HtmlGenerator
 NOVEL_URL = "https://novel-lucky.com/novel/%E0%B8%9C%E0%B8%A1%E0%B9%80%E0%B8%9B%E0%B9%87%E0%B8%99%E0%B9%80%E0%B8%88%E0%B9%89%E0%B8%B2%E0%B8%82%E0%B8%AD%E0%B8%87%E0%B9%82%E0%B8%A3%E0%B8%87%E0%B8%9E%E0%B8%A2%E0%B8%B2%E0%B8%9A%E0%B8%B2%E0%B8%A5/%E0%B8%9C%E0%B8%A1%E0%B9%80%E0%B8%9B%E0%B9%87%E0%B8%99%E0%B9%80%E0%B8%88%E0%B9%89%E0%B8%B2%E0%B8%82%E0%B8%AD%E0%B8%87%E0%B9%82%E0%B8%A3%E0%B8%87%E0%B8%9E%E0%B8%A2%E0%B8%B2%E0%B8%9A%E0%B8%B2%E0%B8%A5/"
 
 def main():
-    parser = argparse.ArgumentParser(description="Clone novel from novel-lucky.com into clean offline HTML reader")
+    parser = argparse.ArgumentParser(description="Clone novel from novel-lucky.com into clean offline HTML reader (peoshi-novel-site)")
     parser.add_argument("--start", type=int, default=None, help="Start chapter number (default: next undownloaded chapter)")
     parser.add_argument("--end", type=int, default=None, help="End chapter number (default: last chapter)")
     parser.add_argument("--all", action="store_true", help="Clone all remaining chapters in the novel")

@@ -21,7 +21,8 @@ if hasattr(sys.stdout, "reconfigure"):
 from src.db import DatabaseManager
 from src.scraper import NovelScraper
 from src.downloader import NovelDownloader
-from src.migrate_sqlite_to_pg import migrate_legacy_novel_db
+from src.migrate_sqlite_to_pg import migrate_legacy_novel_db, migrate_all_sqlite_to_postgres
+from src.reader_template import render_toc_page, render_chapter_page
 from src.auth import (
     AUTH_COOKIE_NAME,
     get_app_password,
@@ -31,7 +32,7 @@ from src.auth import (
     render_login_page,
 )
 
-app = FastAPI(title="Lucky Novel Manager & Offline Reader", version="2.0.0")
+app = FastAPI(title="PeoShi Novel Site", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,16 +81,21 @@ scraper = NovelScraper(decoder=downloader.decoder)
 
 @app.on_event("startup")
 def on_startup():
-    print("[Server] Starting Lucky Novel Reader Service...")
-    # Check and run legacy migration if needed
+    print("[Server] Starting PeoShi Novel Site Service...")
+    # Check and run auto-migration if PostgreSQL is empty or missing data
     try:
-        legacy_path = os.path.join(BASE_DIR, "ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง", "data", "novel.db")
-        existing_hosp = db.get_novel_by_slug("ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง")
-        if not existing_hosp and os.path.exists(legacy_path):
-            print("[Server] Running legacy SQLite migration into database...")
-            migrate_legacy_novel_db(db, legacy_path)
+        existing_novels = db.get_latest_downloaded(limit=1)
+        if not existing_novels:
+            sqlite_lib = os.path.join(BASE_DIR, "data", "novel_library.db")
+            legacy_path = os.path.join(BASE_DIR, "ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง", "data", "novel.db")
+            if os.path.exists(sqlite_lib):
+                print("[Server] Auto-migrating data from SQLite (novel_library.db) to PostgreSQL...")
+                migrate_all_sqlite_to_postgres(db, sqlite_lib)
+            elif os.path.exists(legacy_path):
+                print("[Server] Auto-migrating data from legacy SQLite to PostgreSQL...")
+                migrate_all_sqlite_to_postgres(db, legacy_path)
     except Exception as e:
-        print(f"[Server] Migration error on startup: {e}")
+        print(f"[Server] Auto-migration error on startup: {e}")
 
     # Recover interrupted or stuck downloads caused by redeploy / server restart
     try:
@@ -269,6 +275,53 @@ def list_novels():
     """
     return db.list_novels()
 
+# Dynamic PostgreSQL Reader & TOC Routes
+@app.get("/novel/{slug}", response_class=HTMLResponse)
+def view_novel_toc(slug: str):
+    novel = db.get_novel_by_slug(slug)
+    if not novel:
+        raise HTTPException(status_code=404, detail="ไม่พบนิยายเรื่องนี้")
+    chapters = db.get_chapters_for_novel(novel["id"])
+    html_content = render_toc_page(novel, chapters)
+    return HTMLResponse(content=html_content)
+
+@app.get("/read/{slug}/{chapter_num:int}", response_class=HTMLResponse)
+def view_chapter(slug: str, chapter_num: int):
+    novel = db.get_novel_by_slug(slug)
+    if not novel:
+        raise HTTPException(status_code=404, detail="ไม่พบนิยายเรื่องนี้")
+    chapter = db.get_chapter(novel["id"], chapter_num)
+    if not chapter:
+        raise HTTPException(status_code=404, detail=f"ไม่พบบทที่ {chapter_num}")
+    all_chapters = db.get_chapters_for_novel(novel["id"])
+    html_content = render_chapter_page(novel, chapter, all_chapters)
+    return HTMLResponse(content=html_content)
+
+# Legacy Redirects to Dynamic Reader
+@app.get("/novels/{slug}/chapters/chapter_{num}.html")
+def redirect_legacy_chapter(slug: str, num: str):
+    try:
+        c_num = int(num)
+    except ValueError:
+        c_num = 1
+    return RedirectResponse(url=f"/read/{slug}/{c_num}", status_code=301)
+
+@app.get("/novels/{slug}/index.html")
+def redirect_legacy_novel_toc(slug: str):
+    return RedirectResponse(url=f"/novel/{slug}", status_code=301)
+
+@app.get("/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/chapters/chapter_{num}.html")
+def redirect_legacy_hosp_chapter(num: str):
+    try:
+        c_num = int(num)
+    except ValueError:
+        c_num = 1
+    return RedirectResponse(url=f"/read/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/{c_num}", status_code=301)
+
+@app.get("/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/index.html")
+def redirect_legacy_hosp_toc():
+    return RedirectResponse(url="/novel/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง", status_code=301)
+
 # Mount Static Folders
 # 1. Backward compatibility for legacy novel folder
 legacy_folder = os.path.join(BASE_DIR, "ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง")
@@ -355,7 +408,7 @@ def get_homepage():
     index_file = os.path.join(BASE_DIR, "index.html")
     if os.path.exists(index_file):
         return FileResponse(index_file, media_type="text/html")
-    return {"message": "Lucky Novel Reader API Running"}
+    return {"message": "PeoShi Novel Site API Running"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 21041))

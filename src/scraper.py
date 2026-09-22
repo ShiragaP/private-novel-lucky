@@ -112,6 +112,12 @@ class NovelScraper:
         else:
             description = ""
 
+        if description:
+            description = re.sub(r'โนเวล\s*ลัคกี้', 'PeoShi Novel Site', description)
+            description = re.sub(r'Novel[่\u00ad\s]*Lucky', 'PeoShi Novel Site', description, flags=re.IGNORECASE)
+            description = re.sub(r'peoshi-novel-site', 'PeoShi Novel Site', description)
+            description = re.sub(r'PeoShi Novel Site(?:\s*,\s*|\s+)PeoShi Novel Site', 'PeoShi Novel Site', description)
+
         # Extract Chapters
         chap_elements = soup.find_all("li", class_=lambda c: c and "wp-manga-chapter" in c)
         
@@ -220,6 +226,10 @@ class NovelScraper:
                         clean_line = line.strip()
                         if clean_line:
                             dec = self.decoder.decode_text(clean_line, mapping)
+                            dec = re.sub(r'โนเวล\s*ลัคกี้', 'PeoShi Novel Site', dec)
+                            dec = re.sub(r'Novel[่\u00ad\s]*Lucky', 'PeoShi Novel Site', dec, flags=re.IGNORECASE)
+                            dec = re.sub(r'peoshi-novel-site', 'PeoShi Novel Site', dec)
+                            dec = re.sub(r'PeoShi Novel Site(?:\s*,\s*|\s+)PeoShi Novel Site', 'PeoShi Novel Site', dec)
                             paragraphs.append(dec)
             else:
                 raw_text = reading_content.get_text(separator="\n")
@@ -227,6 +237,10 @@ class NovelScraper:
                     clean_line = line.strip()
                     if clean_line:
                         dec = self.decoder.decode_text(clean_line, mapping)
+                        dec = re.sub(r'โนเวล\s*ลัคกี้', 'PeoShi Novel Site', dec)
+                        dec = re.sub(r'Novel[่\u00ad\s]*Lucky', 'PeoShi Novel Site', dec, flags=re.IGNORECASE)
+                        dec = re.sub(r'peoshi-novel-site', 'PeoShi Novel Site', dec)
+                        dec = re.sub(r'PeoShi Novel Site(?:\s*,\s*|\s+)PeoShi Novel Site', 'PeoShi Novel Site', dec)
                         paragraphs.append(dec)
 
         content_html = "\n".join(f"<p>{p}</p>" for p in paragraphs)

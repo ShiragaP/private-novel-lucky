@@ -18,7 +18,7 @@ def generate_auth_token(password: str) -> str:
     """
     Generate deterministic HMAC SHA-256 token based on password.
     """
-    salt = b"lucky-novel-auth-secret-key-salt"
+    salt = b"peoshi_novel_site_auth_secret_key_salt"
     return hmac.new(salt, password.encode("utf-8"), hashlib.sha256).hexdigest()
 
 def is_valid_token(token: Optional[str]) -> bool:
@@ -56,7 +56,7 @@ def render_login_page(error_msg: str = "", next_url: str = "/") -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>เข้าสู่ระบบ • Lucky Novel Reader</title>
+    <title>เข้าสู่ระบบ • PeoShi Novel Site</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -246,7 +246,7 @@ def render_login_page(error_msg: str = "", next_url: str = "/") -> str:
     <div class="login-container">
         <div class="login-card">
             <div class="logo-badge">🔒</div>
-            <h1>Lucky Novel Reader</h1>
+            <h1>PeoShi Novel Site</h1>
             <p class="subtitle">ระบบถูกจำกัดสิทธิ์เฉพาะส่วนบุคคล<br>กรุณากรอกรหัสผ่านเพื่อเข้าใช้งาน</p>
 
             {error_html}
@@ -277,7 +277,7 @@ def render_login_page(error_msg: str = "", next_url: str = "/") -> str:
             </form>
 
             <div class="footer-note">
-                Lucky Novel Manager • ส่วนตัว & ปลอดภัย
+                PeoShi Novel Site • ส่วนตัว & ปลอดภัย
             </div>
         </div>
     </div>

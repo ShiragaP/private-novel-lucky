@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="referrer" content="no-referrer">
-    <title>Lucky Novel Reader & Manager - คลังนิยายออฟไลน์</title>
+    <title>PeoShi Novel Site - คลังนิยายออฟไลน์</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -342,7 +342,7 @@
     <header>
         <div class="header-content">
             <a href="/" class="brand">
-                <span>📚</span> Lucky Novel Manager & Reader
+                <span>📚</span> PeoShi Novel Site
             </a>
             <div style="display:flex; align-items:center; gap:14px;">
                 <div style="font-size:0.85rem; color:var(--text-muted);">
@@ -363,7 +363,7 @@
         <div class="search-container">
             <div class="tabs">
                 <button class="tab-btn active" id="tabLocal" onclick="switchTab('local')">📂 ค้นหาในคลังที่ดาวน์โหลดแล้ว</button>
-                <button class="tab-btn" id="tabOnline" onclick="switchTab('online')">🌐 ค้นหาออนไลน์บน Novel-Lucky</button>
+                <button class="tab-btn" id="tabOnline" onclick="switchTab('online')">🌐 ค้นหาออนไลน์ (novel-lucky.com)</button>
             </div>
 
             <!-- Local Library Search -->
@@ -420,7 +420,7 @@
     </div>
 
     <footer>
-        <p>Lucky Novel Manager • ปราศจากโฆษณา • ตัวอักษรคมชัด UTF-8</p>
+        <p>PeoShi Novel Site • ปราศจากโฆษณา • ตัวอักษรคมชัด UTF-8</p>
     </footer>
 
     <script>
@@ -507,10 +507,10 @@
         }
 
         function getNovelUrl(n) {
-            if (n.title.includes('โรงพยาบาลจิตเวชพิศวง')) {
-                return '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/index.html';
+            if (n.title && n.title.includes('โรงพยาบาลจิตเวชพิศวง')) {
+                return '/novel/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง';
             }
-            return `/novels/${n.slug}/index.html`;
+            return `/novel/${n.slug}`;
         }
 
         function getImageUrl(url) {
@@ -651,13 +651,12 @@
             grid.innerHTML = results.map((r, index) => {
                 const inLib = r.in_library;
                 const cover = getImageUrl(r.cover_image);
-                const targetLink = inLib 
-                    ? (r.slug ? (r.title.includes('โรงพยาบาลจิตเวชพิศวง') ? '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/index.html' : `/novels/${r.slug}/index.html`) : '#') 
-                    : r.url;
+                const novelPath = r.slug ? (r.title.includes('โรงพยาบาลจิตเวชพิศวง') ? '/novel/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง' : `/novel/${r.slug}`) : '#';
+                const targetLink = inLib ? novelPath : r.url;
                 const targetAttr = inLib ? '' : 'target="_blank" rel="noopener noreferrer"';
                 return `
                     <div class="novel-card">
-                        <a href="${targetLink}" ${targetAttr} class="card-cover-link" title="${inLib ? `เปิดอ่าน ${r.title}` : `ดูข้อมูลบน novel-lucky`}">
+                        <a href="${targetLink}" ${targetAttr} class="card-cover-link" title="${inLib ? `เปิดอ่าน ${r.title}` : `ดูข้อมูลบน novel-lucky.com`}">
                             <img src="${cover}" referrerpolicy="no-referrer" class="card-cover" alt="${r.title}" onerror="this.src='/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/cover.jpg'">
                         </a>
                         <div class="card-body">
@@ -669,7 +668,7 @@
                             <div class="card-actions">
                                 ${inLib ? `
                                     <div style="display:flex; gap:6px; flex:1;">
-                                        <a href="${r.slug ? (r.title.includes('โรงพยาบาลจิตเวชพิศวง') ? '/ผมเป็นเจ้าของโรงพยาบาลจิตเวชพิศวง/index.html' : `/novels/${r.slug}/index.html`) : '#'}" class="btn btn-sm btn-success" style="flex:1; justify-content:center;">✓ ในคลังแล้ว</a>
+                                        <a href="${novelPath}" class="btn btn-sm btn-success" style="flex:1; justify-content:center;">✓ ในคลังแล้ว</a>
                                         ${r.status !== 'completed' && r.downloaded_chapters < r.total_chapters && r.novel_id ? `
                                             <button class="btn btn-sm btn-warning" onclick="resumeDownload(${r.novel_id}, event)" style="padding:6px 10px;" title="ดาวน์โหลดต่อ">🔄 โหลดต่อ</button>
                                         ` : ''}
