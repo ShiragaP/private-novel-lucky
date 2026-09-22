@@ -229,6 +229,9 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
             <div class="reader-settings">
                 <a href="/" class="btn-control" style="font-weight:600;">🏠 หน้าหลักคลังนิยาย</a>
                 <a href="{first_chap_link}" class="btn-control">📖 เริ่มอ่านบทที่ 1</a>
+                <button id="btnTocCleanerToggle" class="btn-control" onclick="toggleTocCleaner()" style="display:none; font-weight:600;" title="คลิกเพื่อพักหรือทำงานต่อสำหรับระบบเกลาภาษา AI">
+                    <span id="tocCleanerIcon">🤖</span> <span id="tocCleanerText">AI Cleaner</span>
+                </button>
                 <select class="theme-selector" onchange="setTheme(this.value)" id="themeSelector">
                     <option value="light">☀️ สว่าง (Light)</option>
                     <option value="sepia">📜 ถนอมสายตา (Sepia)</option>
@@ -288,6 +291,47 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
                 }}
             }});
         }}
+
+        async function updateTocCleaner() {{
+            try {{
+                const res = await fetch('/api/cleaner/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                const btn = document.getElementById('btnTocCleanerToggle');
+                const icon = document.getElementById('tocCleanerIcon');
+                const text = document.getElementById('tocCleanerText');
+                if (!btn || !data.enabled) return;
+
+                btn.style.display = 'inline-flex';
+                if (data.is_paused) {{
+                    icon.textContent = '▶️';
+                    text.textContent = 'AI พักอยู่ (กดทำงานต่อ)';
+                    btn.style.color = '#d97706';
+                    btn.style.borderColor = '#d97706';
+                }} else {{
+                    icon.textContent = '⏸️';
+                    text.textContent = 'AI กำลังทำงาน (กดเพื่อพัก)';
+                    btn.style.color = '#15803d';
+                    btn.style.borderColor = '#86efac';
+                }}
+            }} catch (e) {{}}
+        }}
+
+        async function toggleTocCleaner() {{
+            const btn = document.getElementById('btnTocCleanerToggle');
+            if (btn) btn.disabled = true;
+            try {{
+                await fetch('/api/cleaner/toggle', {{ method: 'POST' }});
+                await updateTocCleaner();
+            }} catch (e) {{
+                alert('เกิดข้อผิดพลาดในการเปลี่ยนสถานะ AI Cleaner');
+            }} finally {{
+                if (btn) btn.disabled = false;
+            }}
+        }}
+
+        setInterval(updateTocCleaner, 4000);
+        updateTocCleaner();
 
         (function() {{
             const savedTheme = localStorage.getItem('novel_reader_theme') || 'light';

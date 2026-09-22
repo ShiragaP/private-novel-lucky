@@ -282,6 +282,45 @@ def list_novels():
     """
     return db.list_novels()
 
+# LLM Auto-Cleaner Control Endpoints
+@app.get("/api/cleaner/status")
+def get_cleaner_status():
+    try:
+        from src.llm_cleaner import auto_cleaner_controller
+        return auto_cleaner_controller.get_status()
+    except Exception as e:
+        return {"enabled": False, "error": str(e), "is_paused": False, "status": "error"}
+
+@app.post("/api/cleaner/pause")
+def pause_cleaner():
+    try:
+        from src.llm_cleaner import auto_cleaner_controller
+        auto_cleaner_controller.pause()
+        return auto_cleaner_controller.get_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/cleaner/resume")
+def resume_cleaner():
+    try:
+        from src.llm_cleaner import auto_cleaner_controller
+        auto_cleaner_controller.resume()
+        return auto_cleaner_controller.get_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/cleaner/toggle")
+def toggle_cleaner():
+    try:
+        from src.llm_cleaner import auto_cleaner_controller
+        if auto_cleaner_controller.is_paused:
+            auto_cleaner_controller.resume()
+        else:
+            auto_cleaner_controller.pause()
+        return auto_cleaner_controller.get_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Dynamic PostgreSQL Reader & TOC Routes
 @app.get("/novel/{slug}", response_class=HTMLResponse)
 def view_novel_toc(slug: str):

@@ -160,6 +160,9 @@ class LLMChapterCleaner:
         """
         Cleans a single chapter by ID and updates PostgreSQL.
         """
+        if auto_cleaner_controller.is_paused:
+            return False
+
         conn = self.db._get_conn()
         try:
             cur = conn.cursor()
@@ -269,13 +272,62 @@ class LLMChapterCleaner:
 
         print(f"\n[LLM Cleaner] Finished cleaning {completed}/{total} chapters for Novel ID {novel_id}. Total cost: ${self.total_cost_usd:.4f} (~{self.total_cost_thb:.2f}฿)", flush=True)
 
+class AutoCleanerController:
+    def __init__(self):
+        self.is_paused = False
+        self.cleaner: Optional[LLMChapterCleaner] = None
+        self.lock = threading.Lock()
+        self.is_running = False
+
+    def pause(self):
+        with self.lock:
+            self.is_paused = True
+        print("[LLM Auto-Cleaner] ⏸️ Paused by user.", flush=True)
+
+    def resume(self):
+        with self.lock:
+            self.is_paused = False
+        print("[LLM Auto-Cleaner] ▶️ Resumed by user.", flush=True)
+
+    def get_status(self) -> Dict[str, Any]:
+        with self.lock:
+            paused = self.is_paused
+            cleaner = self.cleaner
+            is_running = self.is_running
+
+        if not cleaner:
+            return {
+                "enabled": False,
+                "is_paused": paused,
+                "status": "disabled",
+                "total_cleaned": 0,
+                "total_prompt_tokens": 0,
+                "total_candidate_tokens": 0,
+                "total_cost_usd": 0.0,
+                "total_cost_thb": 0.0,
+                "model_name": ""
+            }
+
+        with cleaner.stats_lock:
+            return {
+                "enabled": True,
+                "is_paused": paused,
+                "status": "paused" if paused else ("processing" if is_running else "idle"),
+                "total_cleaned": cleaner.total_chapters_cleaned,
+                "total_prompt_tokens": cleaner.total_prompt_tokens,
+                "total_candidate_tokens": cleaner.total_candidate_tokens,
+                "total_cost_usd": round(cleaner.total_cost_usd, 5),
+                "total_cost_thb": round(cleaner.total_cost_thb, 3),
+                "model_name": cleaner.model_name
+            }
+
+auto_cleaner_controller = AutoCleanerController()
+
 def start_background_auto_cleaner(workers: int = 2):
     """
     Spawns a background thread that continuously finds uncleaned chapters
     and processes them with Vertex AI LLM in the background.
     """
-    import threading
-
     b64_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_BASE64", "")
     project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
     auto_enabled = os.environ.get("AUTO_CLEAN_ON_STARTUP", "true").lower() in ("true", "1", "yes")
@@ -293,6 +345,7 @@ def start_background_auto_cleaner(workers: int = 2):
         time.sleep(5)
         try:
             cleaner = LLMChapterCleaner()
+            auto_cleaner_controller.cleaner = cleaner
         except Exception as e:
             print(f"[LLM Auto-Cleaner] Failed to initialize cleaner: {e}", flush=True)
             return
@@ -300,6 +353,12 @@ def start_background_auto_cleaner(workers: int = 2):
         print(f"[LLM Auto-Cleaner] Background auto-cleaner active (Model: {cleaner.model_name}, Workers: {workers}).", flush=True)
 
         while True:
+            # Check pause status
+            if auto_cleaner_controller.is_paused:
+                auto_cleaner_controller.is_running = False
+                time.sleep(1.5)
+                continue
+
             conn = cleaner.db._get_conn()
             try:
                 cur = conn.cursor()
@@ -329,10 +388,18 @@ def start_background_auto_cleaner(workers: int = 2):
                 cleaner.db._release_conn(conn)
 
             if not batch:
-                # No uncleaned chapters right now, sleep and poll every 60 seconds
-                time.sleep(60)
+                auto_cleaner_controller.is_running = False
+                # No uncleaned chapters right now, sleep and poll every 60 seconds (wake up quickly if paused)
+                for _ in range(60):
+                    if auto_cleaner_controller.is_paused:
+                        break
+                    time.sleep(1)
                 continue
 
+            if auto_cleaner_controller.is_paused:
+                continue
+
+            auto_cleaner_controller.is_running = True
             print(f"[LLM Auto-Cleaner] Processing batch of {len(batch)} uncleaned chapters...", flush=True)
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {executor.submit(cleaner.clean_chapter, ch[0]): ch for ch in batch}
@@ -343,11 +410,12 @@ def start_background_auto_cleaner(workers: int = 2):
                         if res:
                             print(f"[LLM Auto-Cleaner] ✨ Finished Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]}", flush=True)
                         else:
-                            print(f"[LLM Auto-Cleaner] ⚠️ Skipped Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]} (empty content)", flush=True)
+                            print(f"[LLM Auto-Cleaner] ⚠️ Skipped Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]} (empty content or paused)", flush=True)
                     except Exception as e:
                         print(f"[LLM Auto-Cleaner] ❌ Error cleaning Novel ID {ch[1]} Chapter {ch[2]}: {e}", flush=True)
                         time.sleep(5)  # small pause if rate-limited
 
+            auto_cleaner_controller.is_running = False
             print(f"[LLM Auto-Cleaner] Batch of {len(batch)} chapters finished. Total session cost: ${cleaner.total_cost_usd:.4f} (~{cleaner.total_cost_thb:.2f}฿ for {cleaner.total_chapters_cleaned} chaps). Waiting for next batch...", flush=True)
             time.sleep(2)  # small pause between batches
 

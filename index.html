@@ -328,6 +328,76 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        .cleaner-banner {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 20px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            box-shadow: var(--shadow);
+        }
+        .cleaner-banner-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .cleaner-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1rem;
+        }
+        .cleaner-icon {
+            font-size: 1.25rem;
+        }
+        .cleaner-pill {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 9999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .pill-active {
+            background: #dcfce7;
+            color: #15803d;
+            border: 1px solid #86efac;
+        }
+        .pill-paused {
+            background: #fef3c7;
+            color: #b45309;
+            border: 1px solid #fde68a;
+        }
+        .pill-idle {
+            background: #f1f5f9;
+            color: #475569;
+            border: 1px solid #cbd5e1;
+        }
+        .cleaner-stats-text {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        .btn-cleaner-action {
+            background: #d97706;
+            color: white;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-cleaner-action:hover {
+            background: #b45309;
+        }
+        .btn-cleaner-resume {
+            background: #16a34a !important;
+        }
+        .btn-cleaner-resume:hover {
+            background: #15803d !important;
+        }
         footer {
             background: #fff;
             border-top: 1px solid var(--border);
@@ -357,6 +427,26 @@
         <div class="hero">
             <h1>คลังนิยายออฟไลน์ & ระบบค้นหาดาวน์โหลด</h1>
             <p>ค้นหานิยายจาก novel-lucky.com หรือค้นหาในคลังดาวน์โหลดบนเซิร์ฟเวอร์</p>
+        </div>
+
+        <!-- LLM Auto-Cleaner Control Banner -->
+        <div id="cleanerBanner" class="cleaner-banner">
+            <div class="cleaner-banner-info">
+                <div class="cleaner-title-row">
+                    <span class="cleaner-icon">🤖</span>
+                    <strong>ระบบเกลาภาษาอัตโนมัติ (LLM Auto-Cleaner)</strong>
+                    <span id="cleanerBadge" class="cleaner-pill pill-idle">กำลังเชื่อมต่อ...</span>
+                </div>
+                <div id="cleanerStatsText" class="cleaner-stats-text">
+                    กำลังตรวจสอบสถานะคิวเกลาภาษา...
+                </div>
+            </div>
+            <div class="cleaner-banner-action">
+                <button id="btnToggleCleaner" class="btn btn-sm btn-cleaner-action" onclick="toggleCleaner()" style="display:none;">
+                    <span id="btnCleanerIcon">⏸️</span>
+                    <span id="btnCleanerText">พักการเกลาภาษา</span>
+                </button>
+            </div>
         </div>
 
         <!-- Search Bar Section -->
@@ -770,6 +860,76 @@
             }, 2500);
             activePollers[novelId] = timer;
         }
+
+        // ----------------------------------------------------
+        // LLM Auto-Cleaner Controls & Status Polling
+        // ----------------------------------------------------
+        async function updateCleanerWidget() {
+            try {
+                const res = await fetch('/api/cleaner/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                const badge = document.getElementById('cleanerBadge');
+                const stats = document.getElementById('cleanerStatsText');
+                const btn = document.getElementById('btnToggleCleaner');
+                const btnIcon = document.getElementById('btnCleanerIcon');
+                const btnText = document.getElementById('btnCleanerText');
+
+                if (!data.enabled) {
+                    badge.className = 'cleaner-pill pill-idle';
+                    badge.textContent = '⚪ ไม่ได้เปิดใช้งาน';
+                    stats.textContent = 'ไม่มีการกำหนดค่า Vertex AI ในระบบ';
+                    if (btn) btn.style.display = 'none';
+                    return;
+                }
+
+                if (btn) btn.style.display = 'inline-flex';
+                const model = data.model_name || 'Gemini Flash';
+                const cleaned = data.total_cleaned || 0;
+                const costUsd = data.total_cost_usd || 0;
+                const costThb = data.total_cost_thb || 0;
+
+                if (data.is_paused) {
+                    badge.className = 'cleaner-pill pill-paused';
+                    badge.textContent = '⏸️ หยุดชั่วคราว (Paused)';
+                    if (btn) {
+                        btn.className = 'btn btn-sm btn-cleaner-action btn-cleaner-resume';
+                        btnIcon.textContent = '▶️';
+                        btnText.textContent = 'ทำงานต่อ (Resume)';
+                    }
+                    stats.innerHTML = `เกลาเสร็จแล้วในเซสชัน: <strong>${cleaned}</strong> ตอน | ค่าใช้จ่ายสะสม: <strong>$${costUsd.toFixed(4)}</strong> (~${costThb.toFixed(2)}฿) • โมเดล: <code>${model}</code>`;
+                } else {
+                    const isProc = data.status === 'processing';
+                    badge.className = 'cleaner-pill pill-active';
+                    badge.textContent = isProc ? '⚡ กำลังเกลาข้อความ...' : '🟢 สแตนด์บายพร้อมทำงาน';
+                    if (btn) {
+                        btn.className = 'btn btn-sm btn-cleaner-action';
+                        btnIcon.textContent = '⏸️';
+                        btnText.textContent = 'พักการเกลา (Pause)';
+                    }
+                    stats.innerHTML = `เกลาเสร็จแล้วในเซสชัน: <strong>${cleaned}</strong> ตอน | ค่าใช้จ่ายสะสม: <strong>$${costUsd.toFixed(4)}</strong> (~${costThb.toFixed(2)}฿) • โมเดล: <code>${model}</code>`;
+                }
+            } catch (e) {
+                console.warn('Failed to fetch cleaner status:', e);
+            }
+        }
+
+        async function toggleCleaner() {
+            const btn = document.getElementById('btnToggleCleaner');
+            if (btn) btn.disabled = true;
+            try {
+                await fetch('/api/cleaner/toggle', { method: 'POST' });
+                await updateCleanerWidget();
+            } catch (e) {
+                alert('เกิดข้อผิดพลาดในการเปลี่ยนสถานะ AI Cleaner');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        setInterval(updateCleanerWidget, 4000);
+        updateCleanerWidget();
 
         // Initial load
         loadAllData();
