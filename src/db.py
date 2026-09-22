@@ -101,6 +101,11 @@ class DatabaseManager:
                         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     );
                     ALTER TABLE novels ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;
+                    ALTER TABLE novels ADD COLUMN IF NOT EXISTS total_prompt_tokens BIGINT DEFAULT 0;
+                    ALTER TABLE novels ADD COLUMN IF NOT EXISTS total_candidate_tokens BIGINT DEFAULT 0;
+                    ALTER TABLE novels ADD COLUMN IF NOT EXISTS total_clean_cost_usd NUMERIC(10, 6) DEFAULT 0.0;
+                    ALTER TABLE novels ADD COLUMN IF NOT EXISTS total_clean_cost_thb NUMERIC(10, 4) DEFAULT 0.0;
+
                     CREATE TABLE IF NOT EXISTS chapters (
                         id SERIAL PRIMARY KEY,
                         novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
@@ -118,6 +123,11 @@ class DatabaseManager:
                     );
                     ALTER TABLE chapters ADD COLUMN IF NOT EXISTS is_cleaned BOOLEAN DEFAULT FALSE;
                     ALTER TABLE chapters ADD COLUMN IF NOT EXISTS cleaned_at TIMESTAMP WITH TIME ZONE;
+                    ALTER TABLE chapters ADD COLUMN IF NOT EXISTS prompt_tokens INTEGER DEFAULT 0;
+                    ALTER TABLE chapters ADD COLUMN IF NOT EXISTS candidate_tokens INTEGER DEFAULT 0;
+                    ALTER TABLE chapters ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(10, 6) DEFAULT 0.0;
+                    ALTER TABLE chapters ADD COLUMN IF NOT EXISTS cost_thb NUMERIC(10, 4) DEFAULT 0.0;
+
                     CREATE TABLE IF NOT EXISTS font_mappings (
                         font_url TEXT PRIMARY KEY,
                         mapping_json TEXT NOT NULL,
@@ -141,6 +151,10 @@ class DatabaseManager:
                         status TEXT DEFAULT 'idle',
                         error_message TEXT,
                         is_pinned INTEGER DEFAULT 0,
+                        total_prompt_tokens INTEGER DEFAULT 0,
+                        total_candidate_tokens INTEGER DEFAULT 0,
+                        total_clean_cost_usd REAL DEFAULT 0.0,
+                        total_clean_cost_thb REAL DEFAULT 0.0,
                         created_at TEXT,
                         updated_at TEXT
                     );
@@ -149,6 +163,15 @@ class DatabaseManager:
                 cols = [c[1] for c in cur.fetchall()]
                 if "is_pinned" not in cols:
                     cur.execute("ALTER TABLE novels ADD COLUMN is_pinned INTEGER DEFAULT 0;")
+                if "total_prompt_tokens" not in cols:
+                    cur.execute("ALTER TABLE novels ADD COLUMN total_prompt_tokens INTEGER DEFAULT 0;")
+                if "total_candidate_tokens" not in cols:
+                    cur.execute("ALTER TABLE novels ADD COLUMN total_candidate_tokens INTEGER DEFAULT 0;")
+                if "total_clean_cost_usd" not in cols:
+                    cur.execute("ALTER TABLE novels ADD COLUMN total_clean_cost_usd REAL DEFAULT 0.0;")
+                if "total_clean_cost_thb" not in cols:
+                    cur.execute("ALTER TABLE novels ADD COLUMN total_clean_cost_thb REAL DEFAULT 0.0;")
+
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS chapters (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,6 +186,10 @@ class DatabaseManager:
                         is_cleaned INTEGER DEFAULT 0,
                         cleaned_at TEXT,
                         fetched_at TEXT,
+                        prompt_tokens INTEGER DEFAULT 0,
+                        candidate_tokens INTEGER DEFAULT 0,
+                        cost_usd REAL DEFAULT 0.0,
+                        cost_thb REAL DEFAULT 0.0,
                         UNIQUE(novel_id, chapter_num),
                         FOREIGN KEY(novel_id) REFERENCES novels(id) ON DELETE CASCADE
                     );
@@ -173,6 +200,15 @@ class DatabaseManager:
                     cur.execute("ALTER TABLE chapters ADD COLUMN is_cleaned INTEGER DEFAULT 0;")
                 if "cleaned_at" not in chap_cols:
                     cur.execute("ALTER TABLE chapters ADD COLUMN cleaned_at TEXT;")
+                if "prompt_tokens" not in chap_cols:
+                    cur.execute("ALTER TABLE chapters ADD COLUMN prompt_tokens INTEGER DEFAULT 0;")
+                if "candidate_tokens" not in chap_cols:
+                    cur.execute("ALTER TABLE chapters ADD COLUMN candidate_tokens INTEGER DEFAULT 0;")
+                if "cost_usd" not in chap_cols:
+                    cur.execute("ALTER TABLE chapters ADD COLUMN cost_usd REAL DEFAULT 0.0;")
+                if "cost_thb" not in chap_cols:
+                    cur.execute("ALTER TABLE chapters ADD COLUMN cost_thb REAL DEFAULT 0.0;")
+
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS font_mappings (
                         font_url TEXT PRIMARY KEY,

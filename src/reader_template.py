@@ -209,6 +209,11 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
     pending_clean = max(0, downloaded - cleaned)
     stats_extra = f'<span class="toc-stat-divider">•</span><span style="color:#d97706; font-weight:600;">⏳ รอเกลาอีก {pending_clean} ตอน</span>' if pending_clean > 0 else ''
 
+    cost_usd = float(novel.get("total_clean_cost_usd") or 0.0)
+    cost_thb = float(novel.get("total_clean_cost_thb") or 0.0)
+    total_tokens = int(novel.get("total_prompt_tokens") or 0) + int(novel.get("total_candidate_tokens") or 0)
+    cost_stat_html = f'<div style="margin-top:6px; font-size:0.85rem; color:#7c3aed; font-weight:600;">🪙 ค่าใช้จ่าย AI สะสมของเรื่องนี้: ${cost_usd:.4f} (~{cost_thb:.2f}฿) • ใช้ไป {total_tokens:,} tokens</div>' if (cost_usd > 0 or total_tokens > 0) else ''
+
     return f"""<!DOCTYPE html>
 <html lang="th" data-theme="light">
 <head>
@@ -253,6 +258,7 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
                         <span style="color:var(--accent-color); font-weight:600;">✨ เกลาภาษาแล้ว <strong>{cleaned}</strong> ตอน</span>
                         {stats_extra}
                     </div>
+                    {cost_stat_html}
                     {f'''
                     <div style="margin-top:10px;">
                         <button id="btnCleanAllInNovel" class="btn-control" onclick="cleanThisNovel({novel.get('id', 0)})" style="background:#7c3aed; color:#fff; border-color:#6d28d9; font-weight:600; cursor:pointer;" title="สั่งให้ AI เกลาภาษาเฉพาะนิยายเรื่องนี้">

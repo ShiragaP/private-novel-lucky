@@ -639,6 +639,17 @@
                 badgeText = '⚠️ ดาวน์โหลดไม่เสร็จ';
             }
 
+            const cleanCostUsd = parseFloat(n.total_clean_cost_usd || 0);
+            const cleanCostThb = parseFloat(n.total_clean_cost_thb || 0);
+            const cleanTokens = (parseInt(n.total_prompt_tokens || 0) + parseInt(n.total_candidate_tokens || 0));
+            const cleanMetaHtml = (cleanCostUsd > 0 || cleanTokens > 0) ? `
+                <div style="margin-top: 4px; font-size: 0.78rem; color: #7c3aed; font-weight: 600; display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                    <span>🪙 ค่าเกลา: $${cleanCostUsd.toFixed(4)} (~${cleanCostThb.toFixed(2)}฿)</span>
+                    <span style="opacity:0.5;">•</span>
+                    <span>${cleanTokens.toLocaleString()} tokens</span>
+                </div>
+            ` : '';
+
             return `
                 <div class="novel-card" id="card-${n.id}">
                     <a href="${novelLink}" class="card-cover-link" title="เปิดอ่าน ${n.title}">
@@ -656,6 +667,7 @@
                         <a href="${novelLink}" class="card-title" title="${n.title}">${n.title}</a>
                         <div class="card-meta">
                             ${dl} / ${total} ตอน (${percent}%)
+                            ${cleanMetaHtml}
                             ${n.error_message ? `<div style="color:#e53e3e; font-size:0.8rem; margin-top:3px;">${n.error_message}</div>` : ''}
                         </div>
                         <div class="progress-bar-container">

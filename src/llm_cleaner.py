@@ -199,18 +199,42 @@ class LLMChapterCleaner:
                     SET content_text = %s,
                         content_html = %s,
                         is_cleaned = TRUE,
-                        cleaned_at = CURRENT_TIMESTAMP
+                        cleaned_at = CURRENT_TIMESTAMP,
+                        prompt_tokens = %s,
+                        candidate_tokens = %s,
+                        cost_usd = %s,
+                        cost_thb = %s
                     WHERE id = %s;
-                """, (cleaned_text, cleaned_html, chapter_id))
+                """, (cleaned_text, cleaned_html, clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
+                cur.execute("""
+                    UPDATE novels
+                    SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + %s,
+                        total_candidate_tokens = COALESCE(total_candidate_tokens, 0) + %s,
+                        total_clean_cost_usd = COALESCE(total_clean_cost_usd, 0.0) + %s,
+                        total_clean_cost_thb = COALESCE(total_clean_cost_thb, 0.0) + %s
+                    WHERE id = %s;
+                """, (clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, novel_id))
             else:
                 cur.execute("""
                     UPDATE chapters 
                     SET content_text = ?,
                         content_html = ?,
                         is_cleaned = 1,
-                        cleaned_at = ?
+                        cleaned_at = ?,
+                        prompt_tokens = ?,
+                        candidate_tokens = ?,
+                        cost_usd = ?,
+                        cost_thb = ?
                     WHERE id = ?;
-                """, (cleaned_text, cleaned_html, datetime.now().isoformat(), chapter_id))
+                """, (cleaned_text, cleaned_html, datetime.now().isoformat(), clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
+                cur.execute("""
+                    UPDATE novels
+                    SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + ?,
+                        total_candidate_tokens = COALESCE(total_candidate_tokens, 0) + ?,
+                        total_clean_cost_usd = COALESCE(total_clean_cost_usd, 0.0) + ?,
+                        total_clean_cost_thb = COALESCE(total_clean_cost_thb, 0.0) + ?
+                    WHERE id = ?;
+                """, (clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, novel_id))
             conn.commit()
             dur = time.time() - t0
 
