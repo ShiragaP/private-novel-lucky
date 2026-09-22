@@ -20,9 +20,16 @@ THAI_CONNECTORS = {
 }
 
 CONTINUATION_STARTERS = (
+    # Demonstratives & Determiners modifying preceding noun (เด็กคน + นี้)
+    'นี้', 'นั้น', 'โน้น', 'เหล่านี้', 'เหล่านั้น', 'เช่นนี้', 'เช่นนั้น',
+    # Adverb prefixes & degree words
     'อย่าง', 'เท่านั้น', 'อีกแล้ว', 'อีกด้วย', 'อีกครั้ง', 'อีกที',
-    'เช่นกัน', 'เหมือนกัน', 'ด้วยกัน', 'นาน', 'มาก', 'น้อย'
+    'เช่นกัน', 'เหมือนกัน', 'ด้วยกัน', 'นาน', 'มาก', 'น้อย',
+    # Prepositions / Directions connecting to preceding verb
+    'ผ่าน', 'ไปยัง', 'เข้าสู่', 'สู่', 'ขึ้นมา', 'ลงไป', 'เข้าไป', 'ออกมา', 'ข้ามไป'
 )
+
+STANDALONE_THI_WORDS = {'ที่นี่', 'ที่นั่น', 'ที่โน่น', 'ที่แท้', 'ที่สุด', 'ที่ไหน'}
 
 NON_START_CHARS = set('ะัาำิีึืฺุู์ํ่้๊๋ๆฯ)]}')
 
@@ -85,21 +92,27 @@ def should_merge_paragraphs(p1: str, p2: str) -> bool:
     if last_word in THAI_CONNECTORS or any(p1.endswith(c) for c in THAI_CONNECTORS):
         return True
 
-    # 4. Next line starts with continuation modifiers (e.g. อย่างมาก, นาน, เท่านั้น)
+    # 4. Next line starts with continuation modifiers / demonstratives (e.g. นี้, นั้น, อย่างมาก, นาน, เท่านั้น)
     if first_word in CONTINUATION_STARTERS or any(p2.startswith(cs) for cs in CONTINUATION_STARTERS):
         return True
 
-    # 5. Broken syllable / character fragment at start of p2 (e.g. 'ยน')
+    # 5. Relative pronoun 'ที่', 'ซึ่ง', 'อัน' starting p2 (modifying preceding noun, unless ที่นี่, ที่แท้, etc.)
+    if first_word in ('ที่', 'ซึ่ง', 'อัน'):
+        if not any(p2.startswith(st) for st in STANDALONE_THI_WORDS):
+            if not p1.endswith(('!', '?', '.', '……', '...')):
+                return True
+
+    # 6. Broken syllable / character fragment at start of p2 (e.g. 'ยน')
     if (len(first_word) <= 3 and 
         all('\u0e00' <= c <= '\u0e7f' for c in first_word) and 
         _THAI_WORDS and first_word not in _THAI_WORDS):
         return True
 
-    # 6. Compound word broken across lines (e.g., โรง + พยาบาล)
+    # 7. Compound word broken across lines (e.g., โรง + พยาบาล)
     if last_word and first_word and (last_word + first_word) in _THAI_WORDS:
         return True
 
-    # 7. Trailing hyphen, dash, or comma
+    # 8. Trailing hyphen, dash, or comma
     if p1.endswith(('-', '—', ',')):
         return True
 
