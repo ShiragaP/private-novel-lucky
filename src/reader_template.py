@@ -1,5 +1,126 @@
 import html
+import re
 from typing import List, Dict, Any, Optional
+
+try:
+    from pythainlp.corpus import thai_words
+    from pythainlp.tokenize import word_tokenize
+    _THAI_WORDS = set(thai_words())
+except Exception:
+    _THAI_WORDS = set()
+    def word_tokenize(text: str) -> List[str]:
+        return [text]
+
+THAI_CONNECTORS = {
+    'ทั้ง', 'และ', 'หรือ', 'กับ', 'ว่า', 'ที่', 'ซึ่ง', 'อัน', 'ของ', 'โดย', 'เพื่อ', 
+    'แต่', 'เพราะ', 'จึง', 'ก็', 'ให้', 'ไป', 'มา', 'อยู่', 'ได้', 'แล้ว', 'ยัง', 
+    'กำลัง', 'ความ', 'การ', 'อย่าง', 'เหมือน', 'คล้าย', 'ราวกับ', 'เช่น', 'ดัง', 
+    'รวมทั้ง', 'ตลอดจน', 'เนื่องจาก', 'จน', 'จนกระทั่ง', 'กระทั่ง', 'พร้อม', 'พร้อมทั้ง', 
+    'ขณะที่', 'ระหว่าง', 'ก่อน', 'หลัง', 'หาก', 'ถ้า', 'แม้', 'แม้น', 'ถึง', 'แม้ว่า', 
+    'ต่อ', 'แก่', 'แด่', 'เฉพาะ', 'ตาม', 'ใน', 'ณ'
+}
+
+NON_START_CHARS = set('ะัาำิีึืฺุู์ํ่้๊๋ๆฯ')
+
+def split_conjoined_quotes(text: str) -> List[str]:
+    """
+    Split dialogues when closing quote is immediately followed by opening quote:
+    e.g. '“สวัสดีครับ” “อ้าว สวัสดี”' -> ['“สวัสดีครับ”', '“อ้าว สวัสดี”']
+    """
+    parts = re.split(r'(?<=[”"’])\s*(?=[“"‘])', text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+def has_unclosed_quote(text: str) -> bool:
+    open_curly = text.count('“')
+    close_curly = text.count('”')
+    if open_curly > close_curly:
+        return True
+    straight_quotes = text.count('"')
+    if straight_quotes % 2 != 0:
+        return True
+    return False
+
+def ends_with_quote(text: str) -> bool:
+    t = text.strip()
+    return bool(t and t[-1] in '”"’')
+
+def starts_with_quote(text: str) -> bool:
+    t = text.strip()
+    return bool(t and t[0] in '“"‘')
+
+def should_merge_paragraphs(p1: str, p2: str) -> bool:
+    p1 = p1.strip()
+    p2 = p2.strip()
+    if not p1 or not p2:
+        return False
+
+    # Never merge when p1 ends with a closing quote and p2 starts with an opening quote
+    if ends_with_quote(p1) and starts_with_quote(p2):
+        return False
+
+    # Unclosed quote continues into next line
+    if has_unclosed_quote(p1):
+        return True
+
+    # Next line starts with invalid characters (floating vowel, tone mark, maiyamok, closing brackets)
+    if p2[0] in NON_START_CHARS or p2[0] in ')]}':
+        return True
+
+    # Check words with PyThaiNLP
+    tokens1 = word_tokenize(p1)
+    tokens2 = word_tokenize(p2)
+    last_word = tokens1[-1] if tokens1 else ''
+    first_word = tokens2[0] if tokens2 else ''
+
+    # Dangling connector at end of p1
+    if last_word in THAI_CONNECTORS:
+        return True
+
+    # Compound word broken across lines (e.g., โรง + พยาบาล)
+    if last_word and first_word and (last_word + first_word) in _THAI_WORDS:
+        return True
+
+    # Trailing hyphen, dash, or comma
+    if p1.endswith(('-', '—', ',')):
+        return True
+
+    return False
+
+def format_thai_novel_content(content_html: str, content_text: str = "") -> str:
+    """
+    Format paragraphs dynamically for Thai novel reading:
+    - Splits conjoined dialogues on the same line into separate lines.
+    - Merges broken lines caused by bad source line wrapping.
+    - Preserves independent dialogue lines.
+    """
+    raw_paras = []
+    if content_html:
+        # Extract existing <p> blocks
+        p_matches = re.findall(r'<p>(.*?)</p>', content_html, flags=re.DOTALL | re.IGNORECASE)
+        if p_matches:
+            for m in p_matches:
+                clean_m = html.unescape(m).strip()
+                if clean_m:
+                    raw_paras.extend(split_conjoined_quotes(clean_m))
+    
+    if not raw_paras and content_text:
+        for line in content_text.splitlines():
+            line = line.strip()
+            if line:
+                raw_paras.extend(split_conjoined_quotes(line))
+
+    if not raw_paras:
+        return ""
+
+    merged = [raw_paras[0]]
+    for next_p in raw_paras[1:]:
+        prev_p = merged[-1]
+        if should_merge_paragraphs(prev_p, next_p):
+            merged[-1] = prev_p + next_p
+        else:
+            merged.append(next_p)
+
+    return "\n".join(f"<p>{html.escape(p)}</p>" for p in merged)
 
 def clean_chapter_title(title: str, novel_title: str = "") -> str:
     if not title:
@@ -156,11 +277,11 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
         options_html.append(f'<option value="/read/{slug}/{c_num}"{selected}>{title_text}</option>')
     dropdown_options = "\n".join(options_html)
 
-    # Content paragraphs
-    content_html = current_chapter.get("content_html", "")
-    if not content_html and current_chapter.get("content_text"):
-        paras = current_chapter["content_text"].split("\n\n")
-        content_html = "\n".join(f"<p>{html.escape(p)}</p>" for p in paras if p.strip())
+    # Content paragraphs (Dynamic Thai novel formatting)
+    content_html = format_thai_novel_content(
+        current_chapter.get("content_html", ""),
+        current_chapter.get("content_text", "")
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="th" data-theme="light">
