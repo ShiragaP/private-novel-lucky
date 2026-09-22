@@ -10,6 +10,7 @@ import httpx
 from .db import DatabaseManager
 from .scraper import NovelScraper
 from .font_decoder import FontDecoder
+from .html_generator import HtmlGenerator
 
 def generate_slug(title: str, url: str) -> str:
     # Try extracting slug from URL first
@@ -181,13 +182,15 @@ class NovelDownloader:
         if not novel:
             return
 
-        novel_dir = self.get_novel_dir(novel)
-        cover_local_path = os.path.join(novel_dir, "cover.jpg")
-        if novel.get("cover_image"):
-            self.download_cover_image(novel["cover_image"], cover_local_path)
-
-        html_gen = HtmlGenerator(output_dir=novel_dir)
-        html_gen.ensure_stylesheet()
+        try:
+            novel_dir = self.get_novel_dir(novel)
+            cover_local_path = os.path.join(novel_dir, "cover.jpg")
+            if novel.get("cover_image"):
+                self.download_cover_image(novel["cover_image"], cover_local_path)
+            html_gen = HtmlGenerator(output_dir=novel_dir)
+            html_gen.ensure_stylesheet()
+        except Exception as e:
+            safe_print(f"[Worker] Non-critical setup warning for novel {novel_id}: {e}")
 
         all_chapters = self.db.get_chapters_for_novel(novel_id)
         pending = self.db.get_pending_chapters(novel_id)
