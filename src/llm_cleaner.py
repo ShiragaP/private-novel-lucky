@@ -4,8 +4,9 @@ import json
 import time
 import base64
 import argparse
+import threading
 sys.stdout.reconfigure(encoding='utf-8')
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, NamedTuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dotenv import load_dotenv
@@ -17,6 +18,31 @@ from google import genai
 from google.genai import types
 
 from .db import DatabaseManager
+
+class CleanResult(NamedTuple):
+    text: str
+    prompt_tokens: int = 0
+    candidate_tokens: int = 0
+    cost_usd: float = 0.0
+    cost_thb: float = 0.0
+
+    def __str__(self):
+        return self.text
+
+# Vertex AI pricing per 1,000,000 tokens ($0.075 input, $0.30 output for Flash/Flash-Lite; $1.25/$5.00 for Pro)
+PRICING_RATES = {
+    "default": {"in": 0.075, "out": 0.30},
+    "flash": {"in": 0.075, "out": 0.30},
+    "flash-lite": {"in": 0.075, "out": 0.30},
+    "pro": {"in": 1.25, "out": 5.00},
+}
+
+def get_token_costs(prompt_tokens: int, candidate_tokens: int, model_name: str, usd_to_thb: float = 35.0):
+    m = model_name.lower()
+    rates = PRICING_RATES["pro"] if "pro" in m else PRICING_RATES["default"]
+    usd = (prompt_tokens / 1_000_000.0) * rates["in"] + (candidate_tokens / 1_000_000.0) * rates["out"]
+    thb = usd * usd_to_thb
+    return usd, thb
 
 SAFETY_SETTINGS = [
     types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
@@ -65,12 +91,19 @@ class LLMChapterCleaner:
         )
         self.db = DatabaseManager()
 
-    def clean_text(self, raw_text: str, max_retries: int = 3) -> str:
+        self.stats_lock = threading.Lock()
+        self.total_chapters_cleaned = 0
+        self.total_prompt_tokens = 0
+        self.total_candidate_tokens = 0
+        self.total_cost_usd = 0.0
+        self.total_cost_thb = 0.0
+
+    def clean_text(self, raw_text: str, max_retries: int = 3) -> CleanResult:
         """
         Calls Gemini Flash on Vertex AI to clean broken line wraps in Thai novel text.
         """
         if not raw_text or not raw_text.strip():
-            return ""
+            return CleanResult(text="")
 
         prompt = f"กรุณาจัดย่อหน้าข้อความนิยายต่อไปนี้ให้ถูกต้องตามกฎ:\n\n{raw_text.strip()}"
         
@@ -98,7 +131,19 @@ class LLMChapterCleaner:
                         print(f"[LLM Cleaner] Candidate empty on attempt {attempt}/{max_retries}. finish_reason: {cand.finish_reason}", flush=True)
 
                 if cleaned:
-                    return cleaned
+                    p_tok = 0
+                    c_tok = 0
+                    if hasattr(resp, "usage_metadata") and resp.usage_metadata:
+                        p_tok = getattr(resp.usage_metadata, "prompt_token_count", 0) or 0
+                        c_tok = getattr(resp.usage_metadata, "candidates_token_count", 0) or 0
+                    cost_usd, cost_thb = get_token_costs(p_tok, c_tok, self.model_name)
+                    return CleanResult(
+                        text=cleaned,
+                        prompt_tokens=p_tok,
+                        candidate_tokens=c_tok,
+                        cost_usd=cost_usd,
+                        cost_thb=cost_thb
+                    )
                 else:
                     print(f"[LLM Cleaner] Attempt {attempt}/{max_retries} returned empty response. Retrying...", flush=True)
                     if attempt < max_retries:
@@ -109,7 +154,7 @@ class LLMChapterCleaner:
                     time.sleep(2 * attempt)
 
         print(f"[LLM Cleaner] Warning: All {max_retries} attempts failed to produce cleaned text. Falling back to original text.", flush=True)
-        return raw_text
+        return CleanResult(text=raw_text)
 
     def clean_chapter(self, chapter_id: int) -> bool:
         """
@@ -136,10 +181,13 @@ class LLMChapterCleaner:
 
             novel_id, c_num, title, raw_text = row
             t0 = time.time()
-            cleaned_text = self.clean_text(raw_text)
+            clean_res = self.clean_text(raw_text)
+            cleaned_text = clean_res.text
 
             # Generate clean HTML paragraphs
             paras = [p.strip() for p in cleaned_text.split("\n") if p.strip()]
+            if not paras:
+                paras = [raw_text.strip()] if raw_text.strip() else []
             cleaned_html = "\n".join(f"<p>{p}</p>" for p in paras)
 
             if self.db.is_postgres:
@@ -162,7 +210,24 @@ class LLMChapterCleaner:
                 """, (cleaned_text, cleaned_html, datetime.now().isoformat(), chapter_id))
             conn.commit()
             dur = time.time() - t0
-            print(f"[LLM Auto-Cleaner] ✅ Cleaned & saved Novel ID {novel_id} | Chap {c_num}: {title} ({len(paras)} paras in {dur:.2f}s)", flush=True)
+
+            with self.stats_lock:
+                self.total_chapters_cleaned += 1
+                self.total_prompt_tokens += clean_res.prompt_tokens
+                self.total_candidate_tokens += clean_res.candidate_tokens
+                self.total_cost_usd += clean_res.cost_usd
+                self.total_cost_thb += clean_res.cost_thb
+                tot_chaps = self.total_chapters_cleaned
+                tot_usd = self.total_cost_usd
+                tot_thb = self.total_cost_thb
+
+            tot_tokens = clean_res.prompt_tokens + clean_res.candidate_tokens
+            print(
+                f"[LLM Auto-Cleaner] ✅ Cleaned Novel ID {novel_id} | Chap {c_num}: {title}\n"
+                f"   ↳ {len(paras)} paras in {dur:.2f}s | Tokens: {tot_tokens:,} (Prompt: {clean_res.prompt_tokens:,}, Output: {clean_res.candidate_tokens:,})\n"
+                f"   ↳ Cost: ${clean_res.cost_usd:.5f} (~{clean_res.cost_thb:.3f}฿) | Session Total ({tot_chaps} chaps): ${tot_usd:.4f} (~{tot_thb:.2f}฿)",
+                flush=True
+            )
             return True
         finally:
             self.db._release_conn(conn)
@@ -201,6 +266,8 @@ class LLMChapterCleaner:
                     print(f"[LLM Cleaner] [{completed}/{total}] ({pct:.1f}%) Finished Chapter {ch[1]}: {ch[2]}", flush=True)
                 except Exception as e:
                     print(f"[LLM Cleaner] [{completed}/{total}] ERROR on Chapter {ch[1]}: {e}", flush=True)
+
+        print(f"\n[LLM Cleaner] Finished cleaning {completed}/{total} chapters for Novel ID {novel_id}. Total cost: ${self.total_cost_usd:.4f} (~{self.total_cost_thb:.2f}฿)", flush=True)
 
 def start_background_auto_cleaner(workers: int = 2):
     """
@@ -281,7 +348,7 @@ def start_background_auto_cleaner(workers: int = 2):
                         print(f"[LLM Auto-Cleaner] ❌ Error cleaning Novel ID {ch[1]} Chapter {ch[2]}: {e}", flush=True)
                         time.sleep(5)  # small pause if rate-limited
 
-            print(f"[LLM Auto-Cleaner] Batch of {len(batch)} chapters finished. Waiting for next batch...", flush=True)
+            print(f"[LLM Auto-Cleaner] Batch of {len(batch)} chapters finished. Total session cost: ${cleaner.total_cost_usd:.4f} (~{cleaner.total_cost_thb:.2f}฿ for {cleaner.total_chapters_cleaned} chaps). Waiting for next batch...", flush=True)
             time.sleep(2)  # small pause between batches
 
     t = threading.Thread(target=_worker_loop, daemon=True, name="LLMAutoCleanerThread")
