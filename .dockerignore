@@ -1,0 +1,22 @@
+# Git & Environment
+.git/
+.gitignore
+.env
+.venv/
+env/
+venv/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Data & SQLite (Postgres volume is managed separately)
+*.db
+*.db-wal
+*.db-shm
+
+# OS files
+.DS_Store
+Thumbs.db
