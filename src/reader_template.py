@@ -12,15 +12,19 @@ except Exception:
         return [text]
 
 THAI_CONNECTORS = {
+    # Conjunctions & Prepositions that cannot end a sentence
     'ทั้ง', 'และ', 'หรือ', 'กับ', 'ว่า', 'ที่', 'ซึ่ง', 'อัน', 'ของ', 'โดย', 'เพื่อ', 
-    'แต่', 'เพราะ', 'จึง', 'ก็', 'ให้', 'ไป', 'มา', 'อยู่', 'ได้', 'แล้ว', 'ยัง', 
-    'กำลัง', 'ความ', 'การ', 'อย่าง', 'เหมือน', 'คล้าย', 'ราวกับ', 'เช่น', 'ดัง', 
-    'รวมทั้ง', 'ตลอดจน', 'เนื่องจาก', 'จน', 'จนกระทั่ง', 'กระทั่ง', 'พร้อม', 'พร้อมทั้ง', 
-    'ขณะที่', 'ระหว่าง', 'ก่อน', 'หลัง', 'หาก', 'ถ้า', 'แม้', 'แม้น', 'ถึง', 'แม้ว่า', 
-    'ต่อ', 'แก่', 'แด่', 'เฉพาะ', 'ตาม', 'ใน', 'ณ'
+    'แต่', 'เพราะ', 'จึง', 'ก็', 'รวมทั้ง', 'ตลอดจน', 'เนื่องจาก', 'จนกระทั่ง', 
+    'กระทั่ง', 'พร้อมทั้ง', 'ขณะที่', 'ระหว่าง', 'หาก', 'แม้', 'แม้น', 'แม้ว่า', 
+    'แก่', 'แด่', 'เฉพาะ', 'เป็นเวลา', 'เนื่องด้วย', 'ราวกับ', 'ประหนึ่ง',
 }
 
-NON_START_CHARS = set('ะัาำิีึืฺุู์ํ่้๊๋ๆฯ')
+CONTINUATION_STARTERS = (
+    'อย่าง', 'เท่านั้น', 'อีกแล้ว', 'อีกด้วย', 'อีกครั้ง', 'อีกที',
+    'เช่นกัน', 'เหมือนกัน', 'ด้วยกัน', 'นาน', 'มาก', 'น้อย'
+)
+
+NON_START_CHARS = set('ะัาำิีึืฺุู์ํ่้๊๋ๆฯ)]}')
 
 def split_conjoined_quotes(text: str) -> List[str]:
     """
@@ -58,12 +62,17 @@ def should_merge_paragraphs(p1: str, p2: str) -> bool:
     if ends_with_quote(p1) and starts_with_quote(p2):
         return False
 
-    # Unclosed quote continues into next line
+    # If p2 starts with an opening dialogue quote, keep it on its own line
+    # (Unless p1 has an unclosed quote)
+    if starts_with_quote(p2):
+        return has_unclosed_quote(p1)
+
+    # 1. Unclosed quote continues into next line
     if has_unclosed_quote(p1):
         return True
 
-    # Next line starts with invalid characters (floating vowel, tone mark, maiyamok, closing brackets)
-    if p2[0] in NON_START_CHARS or p2[0] in ')]}':
+    # 2. Next line starts with invalid characters (floating vowel, tone mark, maiyamok, closing brackets)
+    if p2[0] in NON_START_CHARS:
         return True
 
     # Check words with PyThaiNLP
@@ -72,15 +81,25 @@ def should_merge_paragraphs(p1: str, p2: str) -> bool:
     last_word = tokens1[-1] if tokens1 else ''
     first_word = tokens2[0] if tokens2 else ''
 
-    # Dangling connector at end of p1
-    if last_word in THAI_CONNECTORS:
+    # 3. Dangling connector at end of p1 (e.g. ทั้ง, และ, หรือ, ว่า, ที่, ของ, เป็นเวลา)
+    if last_word in THAI_CONNECTORS or any(p1.endswith(c) for c in THAI_CONNECTORS):
         return True
 
-    # Compound word broken across lines (e.g., โรง + พยาบาล)
+    # 4. Next line starts with continuation modifiers (e.g. อย่างมาก, นาน, เท่านั้น)
+    if first_word in CONTINUATION_STARTERS or any(p2.startswith(cs) for cs in CONTINUATION_STARTERS):
+        return True
+
+    # 5. Broken syllable / character fragment at start of p2 (e.g. 'ยน')
+    if (len(first_word) <= 3 and 
+        all('\u0e00' <= c <= '\u0e7f' for c in first_word) and 
+        _THAI_WORDS and first_word not in _THAI_WORDS):
+        return True
+
+    # 6. Compound word broken across lines (e.g., โรง + พยาบาล)
     if last_word and first_word and (last_word + first_word) in _THAI_WORDS:
         return True
 
-    # Trailing hyphen, dash, or comma
+    # 7. Trailing hyphen, dash, or comma
     if p1.endswith(('-', '—', ',')):
         return True
 
@@ -95,8 +114,8 @@ def format_thai_novel_content(content_html: str, content_text: str = "") -> str:
     """
     raw_paras = []
     if content_html:
-        # Extract existing <p> blocks
-        p_matches = re.findall(r'<p>(.*?)</p>', content_html, flags=re.DOTALL | re.IGNORECASE)
+        # Extract existing <p> blocks (supporting attributes like <p class="...">)
+        p_matches = re.findall(r'<p[^>]*>(.*?)</p>', content_html, flags=re.DOTALL | re.IGNORECASE)
         if p_matches:
             for m in p_matches:
                 clean_m = html.unescape(m).strip()
