@@ -138,7 +138,7 @@ class LLMChapterCleaner:
                 """, (cleaned_text, cleaned_html, datetime.now().isoformat(), chapter_id))
             conn.commit()
             dur = time.time() - t0
-            print(f"  [OK] Cleaned Chap {c_num}: {title} ({len(paras)} paras, {dur:.2f}s)")
+            print(f"[LLM Auto-Cleaner] ✅ Cleaned & saved Novel ID {novel_id} | Chap {c_num}: {title} ({len(paras)} paras in {dur:.2f}s)", flush=True)
             return True
         finally:
             self.db._release_conn(conn)
@@ -163,7 +163,7 @@ class LLMChapterCleaner:
             self.db._release_conn(conn)
 
         total = len(chapters)
-        print(f"\n[LLM Cleaner] Found {total} chapters to clean for Novel ID {novel_id} (Workers: {max_workers})...")
+        print(f"\n[LLM Cleaner] Found {total} chapters to clean for Novel ID {novel_id} (Workers: {max_workers})...", flush=True)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_chap = {executor.submit(self.clean_chapter, ch[0]): ch for ch in chapters}
@@ -174,9 +174,9 @@ class LLMChapterCleaner:
                 try:
                     res = future.result()
                     pct = (completed / total) * 100
-                    print(f"[{completed}/{total}] ({pct:.1f}%) Chapter {ch[1]} done.")
+                    print(f"[LLM Cleaner] [{completed}/{total}] ({pct:.1f}%) Finished Chapter {ch[1]}: {ch[2]}", flush=True)
                 except Exception as e:
-                    print(f"[{completed}/{total}] ERROR on Chapter {ch[1]}: {e}")
+                    print(f"[LLM Cleaner] [{completed}/{total}] ERROR on Chapter {ch[1]}: {e}", flush=True)
 
 def start_background_auto_cleaner(workers: int = 2):
     """
@@ -190,11 +190,11 @@ def start_background_auto_cleaner(workers: int = 2):
     auto_enabled = os.environ.get("AUTO_CLEAN_ON_STARTUP", "true").lower() in ("true", "1", "yes")
 
     if not auto_enabled:
-        print("[LLM Auto-Cleaner] AUTO_CLEAN_ON_STARTUP is disabled.")
+        print("[LLM Auto-Cleaner] AUTO_CLEAN_ON_STARTUP is disabled.", flush=True)
         return
 
     if not b64_creds or not project:
-        print("[LLM Auto-Cleaner] Vertex AI credentials not configured in environment. Skipping auto-cleaning.")
+        print("[LLM Auto-Cleaner] Vertex AI credentials not configured in environment. Skipping auto-cleaning.", flush=True)
         return
 
     def _worker_loop():
@@ -203,10 +203,10 @@ def start_background_auto_cleaner(workers: int = 2):
         try:
             cleaner = LLMChapterCleaner()
         except Exception as e:
-            print(f"[LLM Auto-Cleaner] Failed to initialize cleaner: {e}")
+            print(f"[LLM Auto-Cleaner] Failed to initialize cleaner: {e}", flush=True)
             return
 
-        print(f"[LLM Auto-Cleaner] Background auto-cleaner active (Model: {cleaner.model_name}, Workers: {workers}).")
+        print(f"[LLM Auto-Cleaner] Background auto-cleaner active (Model: {cleaner.model_name}, Workers: {workers}).", flush=True)
 
         while True:
             conn = cleaner.db._get_conn()
@@ -232,7 +232,7 @@ def start_background_auto_cleaner(workers: int = 2):
                     """)
                 batch = cur.fetchall()
             except Exception as e:
-                print(f"[LLM Auto-Cleaner] Error querying uncleaned chapters: {e}")
+                print(f"[LLM Auto-Cleaner] Error querying uncleaned chapters: {e}", flush=True)
                 batch = []
             finally:
                 cleaner.db._release_conn(conn)
@@ -242,17 +242,22 @@ def start_background_auto_cleaner(workers: int = 2):
                 time.sleep(60)
                 continue
 
-            print(f"[LLM Auto-Cleaner] Processing batch of {len(batch)} uncleaned chapters...")
+            print(f"[LLM Auto-Cleaner] Processing batch of {len(batch)} uncleaned chapters...", flush=True)
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {executor.submit(cleaner.clean_chapter, ch[0]): ch for ch in batch}
                 for f in as_completed(futures):
                     ch = futures[f]
                     try:
-                        f.result()
+                        res = f.result()
+                        if res:
+                            print(f"[LLM Auto-Cleaner] ✨ Finished Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]}", flush=True)
+                        else:
+                            print(f"[LLM Auto-Cleaner] ⚠️ Skipped Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]} (empty content)", flush=True)
                     except Exception as e:
-                        print(f"[LLM Auto-Cleaner] Error cleaning Novel {ch[1]} Chap {ch[2]}: {e}")
+                        print(f"[LLM Auto-Cleaner] ❌ Error cleaning Novel ID {ch[1]} Chapter {ch[2]}: {e}", flush=True)
                         time.sleep(5)  # small pause if rate-limited
 
+            print(f"[LLM Auto-Cleaner] Batch of {len(batch)} chapters finished. Waiting for next batch...", flush=True)
             time.sleep(2)  # small pause between batches
 
     t = threading.Thread(target=_worker_loop, daemon=True, name="LLMAutoCleanerThread")
