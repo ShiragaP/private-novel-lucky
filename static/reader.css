@@ -273,6 +273,19 @@ body {
     font-family: inherit;
 }
 
+.toc-stats-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 0.95rem;
+}
+
+.toc-stat-divider {
+    opacity: 0.4;
+}
+
 .chapter-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -281,18 +294,87 @@ body {
 }
 
 .chapter-link {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
     padding: 10px 14px;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: 8px;
     text-decoration: none;
     color: var(--text-color);
-    font-size: 0.9rem;
+    transition: all 0.15s ease;
+}
+
+.chapter-title-text {
+    font-size: 0.92rem;
+    font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: all 0.15s;
+}
+
+.chapter-status-row {
+    display: flex;
+    align-items: center;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.2;
+    padding: 2px 7px;
+    border-radius: 4px;
+    width: fit-content;
+}
+
+.badge-cleaned {
+    color: #15803d;
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+}
+[data-theme="dark"] .badge-cleaned {
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.18);
+    border-color: rgba(74, 222, 128, 0.3);
+}
+
+.badge-raw {
+    color: #b45309;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+}
+[data-theme="dark"] .badge-raw {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.18);
+    border-color: rgba(251, 191, 36, 0.3);
+}
+
+.badge-not-ready {
+    color: #b91c1c;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+}
+[data-theme="dark"] .badge-not-ready {
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(248, 113, 113, 0.3);
+}
+
+/* Reader Page Status Pill */
+.chapter-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0 24px 0;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    font-weight: 500;
 }
 
 .chapter-link:hover {

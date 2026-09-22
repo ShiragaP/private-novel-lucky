@@ -179,18 +179,35 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
     desc = html.escape(novel.get("description", ""))
     total = len(chapters)
     downloaded = sum(1 for ch in chapters if ch.get("is_downloaded"))
+    cleaned = sum(1 for ch in chapters if ch.get("is_cleaned"))
 
     chapter_items = []
     for ch in chapters:
         c_num = ch["chapter_num"]
         clean_title = html.escape(clean_chapter_title(ch.get("title", f"บทที่ {c_num}"), novel.get("title", "")))
-        is_dl = ch.get("is_downloaded")
-        badge = "" if is_dl else " <span style='color:#e53e3e;font-size:0.8em;'>[ยังไม่โหลด]</span>"
-        chapter_items.append(f'<a href="/read/{slug}/{c_num}" class="chapter-link" data-title="{clean_title}">{clean_title}{badge}</a>')
+        is_dl = bool(ch.get("is_downloaded"))
+        is_cl = bool(ch.get("is_cleaned"))
+
+        if not is_dl:
+            status_badge = '<span class="status-badge badge-not-ready">⚠️ ยังไม่พร้อม (ยังไม่ดาวน์โหลด)</span>'
+        elif is_cl:
+            status_badge = '<span class="status-badge badge-cleaned">✨ เกลาแล้ว</span>'
+        else:
+            status_badge = '<span class="status-badge badge-raw">⏳ ฉบับดิบ (รอเกลา)</span>'
+
+        chapter_items.append(
+            f'<a href="/read/{slug}/{c_num}" class="chapter-link" data-title="{clean_title}">'
+            f'<span class="chapter-title-text">{clean_title}</span>'
+            f'<span class="chapter-status-row">{status_badge}</span>'
+            f'</a>'
+        )
 
     chapter_list_html = "\n".join(chapter_items)
 
     first_chap_link = f"/read/{slug}/1" if chapters else "#"
+
+    pending_clean = max(0, downloaded - cleaned)
+    stats_extra = f'<span class="toc-stat-divider">•</span><span style="color:#d97706; font-weight:600;">⏳ รอเกลาอีก {pending_clean} ตอน</span>' if pending_clean > 0 else ''
 
     return f"""<!DOCTYPE html>
 <html lang="th" data-theme="light">
@@ -227,9 +244,12 @@ def render_toc_page(novel: Dict[str, Any], chapters: List[Dict[str, Any]]) -> st
                 {'<img src="' + cover_image + '" alt="' + novel_title + '" class="toc-cover">' if cover_image else ''}
                 <div class="toc-info">
                     <h1>{novel_title}</h1>
-                    <p style="color:var(--accent-color); font-weight:600;">
-                        ดาวน์โหลดแล้ว {downloaded} จาก {total} ตอน (Render จาก PostgreSQL)
-                    </p>
+                    <div class="toc-stats-bar">
+                        <span>📥 ดาวน์โหลดแล้ว <strong>{downloaded}</strong>/{total} ตอน</span>
+                        <span class="toc-stat-divider">•</span>
+                        <span style="color:var(--accent-color); font-weight:600;">✨ เกลาภาษาแล้ว <strong>{cleaned}</strong> ตอน</span>
+                        {stats_extra}
+                    </div>
                     <p class="toc-desc">{desc}</p>
                 </div>
             </div>
@@ -309,6 +329,16 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
         options_html.append(f'<option value="/read/{slug}/{c_num}"{selected}>{title_text}</option>')
     dropdown_options = "\n".join(options_html)
 
+    is_dl = bool(current_chapter.get("is_downloaded"))
+    is_cl = bool(current_chapter.get("is_cleaned"))
+
+    if not is_dl:
+        status_bar_html = '<div class="chapter-status-pill badge-not-ready"><span>⚠️</span> ตอนนี้ยังไม่พร้อมอ่าน (ยังไม่ได้ดาวน์โหลดเนื้อหา)</div>'
+    elif is_cl:
+        status_bar_html = '<div class="chapter-status-pill badge-cleaned"><span>✨</span> ตอนนี้ผ่านการเกลาภาษาและจัดย่อหน้าโดย AI แล้ว</div>'
+    else:
+        status_bar_html = '<div class="chapter-status-pill badge-raw"><span>⏳</span> ตอนนี้เป็นฉบับดิบ (ระบบกำลังจัดคิวเกลาภาษาด้วย AI ในพื้นหลัง)</div>'
+
     # Content paragraphs
     if current_chapter.get("is_cleaned") and current_chapter.get("content_html"):
         content_html = current_chapter["content_html"]
@@ -317,6 +347,9 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
             current_chapter.get("content_html", ""),
             current_chapter.get("content_text", "")
         )
+
+    if not is_dl and not content_html.strip():
+        content_html = '<p style="text-align:center; padding: 40px 0; color: #b91c1c; font-size:1.1rem;">⚠️ ตอนนี้ยังไม่ได้ดาวน์โหลดเนื้อหา หรือกำลังอยู่ในคิวดาวน์โหลด กรุณารอสักครู่แล้วรีเฟรชหน้าเว็บ</p>'
 
     return f"""<!DOCTYPE html>
 <html lang="th" data-theme="light">
@@ -361,6 +394,7 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
 
         <article class="chapter-content">
             <h1 class="chapter-title">{clean_chap_title}</h1>
+            {status_bar_html}
             <div class="reading-text" id="readingText">
                 {content_html}
             </div>

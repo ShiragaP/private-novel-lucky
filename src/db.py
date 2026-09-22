@@ -111,9 +111,13 @@ class DatabaseManager:
                         content_text TEXT,
                         content_html TEXT,
                         is_downloaded BOOLEAN DEFAULT FALSE,
+                        is_cleaned BOOLEAN DEFAULT FALSE,
+                        cleaned_at TIMESTAMP WITH TIME ZONE,
                         fetched_at TIMESTAMP WITH TIME ZONE,
                         UNIQUE(novel_id, chapter_num)
                     );
+                    ALTER TABLE chapters ADD COLUMN IF NOT EXISTS is_cleaned BOOLEAN DEFAULT FALSE;
+                    ALTER TABLE chapters ADD COLUMN IF NOT EXISTS cleaned_at TIMESTAMP WITH TIME ZONE;
                     CREATE TABLE IF NOT EXISTS font_mappings (
                         font_url TEXT PRIMARY KEY,
                         mapping_json TEXT NOT NULL,
@@ -156,11 +160,19 @@ class DatabaseManager:
                         content_text TEXT,
                         content_html TEXT,
                         is_downloaded INTEGER DEFAULT 0,
+                        is_cleaned INTEGER DEFAULT 0,
+                        cleaned_at TEXT,
                         fetched_at TEXT,
                         UNIQUE(novel_id, chapter_num),
                         FOREIGN KEY(novel_id) REFERENCES novels(id) ON DELETE CASCADE
                     );
                 """)
+                cur.execute("PRAGMA table_info(chapters);")
+                chap_cols = [c[1] for c in cur.fetchall()]
+                if "is_cleaned" not in chap_cols:
+                    cur.execute("ALTER TABLE chapters ADD COLUMN is_cleaned INTEGER DEFAULT 0;")
+                if "cleaned_at" not in chap_cols:
+                    cur.execute("ALTER TABLE chapters ADD COLUMN cleaned_at TEXT;")
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS font_mappings (
                         font_url TEXT PRIMARY KEY,

@@ -94,11 +94,18 @@ class LLMChapterCleaner:
         conn = self.db._get_conn()
         try:
             cur = conn.cursor()
-            cur.execute("""
-                SELECT novel_id, chapter_num, title, content_text 
-                FROM chapters 
-                WHERE id = %s;
-            """, (chapter_id,))
+            if self.db.is_postgres:
+                cur.execute("""
+                    SELECT novel_id, chapter_num, title, content_text 
+                    FROM chapters 
+                    WHERE id = %s;
+                """, (chapter_id,))
+            else:
+                cur.execute("""
+                    SELECT novel_id, chapter_num, title, content_text 
+                    FROM chapters 
+                    WHERE id = ?;
+                """, (chapter_id,))
             row = cur.fetchone()
             if not row or not row[3]:
                 return False
@@ -111,14 +118,24 @@ class LLMChapterCleaner:
             paras = [p.strip() for p in cleaned_text.split("\n") if p.strip()]
             cleaned_html = "\n".join(f"<p>{p}</p>" for p in paras)
 
-            cur.execute("""
-                UPDATE chapters 
-                SET content_text = %s,
-                    content_html = %s,
-                    is_cleaned = TRUE,
-                    cleaned_at = CURRENT_TIMESTAMP
-                WHERE id = %s;
-            """, (cleaned_text, cleaned_html, chapter_id))
+            if self.db.is_postgres:
+                cur.execute("""
+                    UPDATE chapters 
+                    SET content_text = %s,
+                        content_html = %s,
+                        is_cleaned = TRUE,
+                        cleaned_at = CURRENT_TIMESTAMP
+                    WHERE id = %s;
+                """, (cleaned_text, cleaned_html, chapter_id))
+            else:
+                cur.execute("""
+                    UPDATE chapters 
+                    SET content_text = ?,
+                        content_html = ?,
+                        is_cleaned = 1,
+                        cleaned_at = ?
+                    WHERE id = ?;
+                """, (cleaned_text, cleaned_html, datetime.now().isoformat(), chapter_id))
             conn.commit()
             dur = time.time() - t0
             print(f"  [OK] Cleaned Chap {c_num}: {title} ({len(paras)} paras, {dur:.2f}s)")
@@ -130,13 +147,14 @@ class LLMChapterCleaner:
         conn = self.db._get_conn()
         try:
             cur = conn.cursor()
-            query = "SELECT id, chapter_num, title FROM chapters WHERE novel_id = %s"
+            ph = "%s" if self.db.is_postgres else "?"
+            query = f"SELECT id, chapter_num, title FROM chapters WHERE novel_id = {ph}"
             params = [novel_id]
             if start_chap:
-                query += " AND chapter_num >= %s"
+                query += f" AND chapter_num >= {ph}"
                 params.append(start_chap)
             if end_chap:
-                query += " AND chapter_num <= %s"
+                query += f" AND chapter_num <= {ph}"
                 params.append(end_chap)
             query += " ORDER BY chapter_num ASC;"
             cur.execute(query, tuple(params))
@@ -194,13 +212,24 @@ def start_background_auto_cleaner(workers: int = 2):
             conn = cleaner.db._get_conn()
             try:
                 cur = conn.cursor()
-                cur.execute("""
-                    SELECT id, novel_id, chapter_num, title 
-                    FROM chapters 
-                    WHERE is_cleaned = FALSE AND content_text IS NOT NULL AND content_text != ''
-                    ORDER BY novel_id ASC, chapter_num ASC
-                    LIMIT 20;
-                """)
+                if cleaner.db.is_postgres:
+                    cur.execute("""
+                        SELECT id, novel_id, chapter_num, title 
+                        FROM chapters 
+                        WHERE (is_cleaned = FALSE OR is_cleaned IS NULL) 
+                          AND content_text IS NOT NULL AND content_text != ''
+                        ORDER BY novel_id ASC, chapter_num ASC
+                        LIMIT 20;
+                    """)
+                else:
+                    cur.execute("""
+                        SELECT id, novel_id, chapter_num, title 
+                        FROM chapters 
+                        WHERE (is_cleaned = 0 OR is_cleaned IS NULL) 
+                          AND content_text IS NOT NULL AND content_text != ''
+                        ORDER BY novel_id ASC, chapter_num ASC
+                        LIMIT 20;
+                    """)
                 batch = cur.fetchall()
             except Exception as e:
                 print(f"[LLM Auto-Cleaner] Error querying uncleaned chapters: {e}")
