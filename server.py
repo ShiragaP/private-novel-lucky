@@ -479,6 +479,7 @@ def clean_single_chapter_endpoint(novel_id: int, chapter_num: int):
     if not chap:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
+    chap_id = chap["id"]
     success = cleaner.clean_chapter(chap_id, force=True)
     if not success:
         raise HTTPException(
