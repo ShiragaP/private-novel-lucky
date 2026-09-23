@@ -157,6 +157,57 @@ def _heal_corrupted_chapters(db_manager: DatabaseManager):
                     print(f"[Auto-Heal] Successfully restored chapter 73 title & pristine content from backup!")
                 except Exception as ex:
                     print(f"[Auto-Heal] Failed restoring chapter 73: {ex}")
+
+        # Specific check: Ensure Chapter 73 has full pristine content if it was somehow blanked
+        backup_file = os.path.join(BASE_DIR, "src", "chapter_73_backup.json")
+        if os.path.exists(backup_file):
+            try:
+                cur.execute("""
+                    SELECT id, LENGTH(COALESCE(content_text, '')) 
+                    FROM chapters 
+                    WHERE novel_id = 2 AND chapter_num = 73;
+                """)
+                c73 = cur.fetchone()
+                if c73 and (c73[1] < 100):
+                    print(f"[Auto-Heal] Chapter 73 has insufficient length ({c73[1]} chars). Restoring pristine backup...")
+                    import json
+                    from datetime import datetime
+                    from src.reader_template import format_thai_novel_content
+                    with open(backup_file, "r", encoding="utf-8") as bf:
+                        bdata = json.load(bf)
+                    formatted_html = format_thai_novel_content("", bdata["content_text"])
+                    if db_manager.is_postgres:
+                        cur.execute("""
+                            UPDATE chapters
+                            SET title = %s,
+                                font_url = %s,
+                                content_text = %s,
+                                raw_content = %s,
+                                content_html = %s,
+                                is_downloaded = TRUE,
+                                is_cleaned = FALSE,
+                                cleaned_at = NULL,
+                                fetched_at = NOW()
+                            WHERE novel_id = 2 AND chapter_num = 73;
+                        """, (bdata["title"], bdata["font_url"], bdata["content_text"], bdata["content_text"], formatted_html))
+                    else:
+                        cur.execute("""
+                            UPDATE chapters
+                            SET title = ?,
+                                font_url = ?,
+                                content_text = ?,
+                                raw_content = ?,
+                                content_html = ?,
+                                is_downloaded = 1,
+                                is_cleaned = 0,
+                                cleaned_at = NULL,
+                                fetched_at = ?
+                            WHERE novel_id = 2 AND chapter_num = 73;
+                        """, (bdata["title"], bdata["font_url"], bdata["content_text"], bdata["content_text"], formatted_html, datetime.now().isoformat()))
+                    conn.commit()
+                    print(f"[Auto-Heal] Successfully restored chapter 73 from backup!")
+            except Exception as ex:
+                print(f"[Auto-Heal] Error checking chapter 73 content length: {ex}")
     except Exception as e:
         print(f"[Auto-Heal] Non-critical error checking corrupted chapters: {e}")
     finally:
