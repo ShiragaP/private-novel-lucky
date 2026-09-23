@@ -182,19 +182,27 @@ class NovelScraper:
         """
         import time
         last_exc = None
-        resp = None
+        success_resp = None
         for attempt in range(1, 4):
             try:
                 resp = self.client.get(chapter_url)
                 resp.raise_for_status()
+                success_resp = resp
                 break
             except Exception as e:
                 last_exc = e
                 if attempt < 3:
-                    time.sleep(1.5 * attempt)
-        if not resp:
-            raise last_exc
-        soup = BeautifulSoup(resp.text, "lxml")
+                    time.sleep(2.0 * attempt)
+
+        if not success_resp:
+            err_str = str(last_exc) if last_exc else "Unknown error"
+            if "522" in err_str:
+                raise RuntimeError("เว็บต้นทาง (novel-lucky.com) ขัดข้องชั่วคราว (Cloudflare 522: Connection Timed Out) ขณะนี้ต้นทางไม่ตอบสนอง กรุณารอสักครู่แล้วลองใหม่")
+            elif "ReadTimeout" in err_str or "timed out" in err_str.lower():
+                raise RuntimeError("การเชื่อมต่อไปยังเว็บต้นทางหมดเวลา (Read Timeout) กรุณารอสักครู่แล้วลองใหม่")
+            raise last_exc or RuntimeError(f"ไม่สามารถโหลดเนื้อหาจาก {chapter_url} ได้")
+
+        soup = BeautifulSoup(success_resp.text, "lxml")
 
         # Chapter Title
         chapter_title = ""

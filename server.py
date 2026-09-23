@@ -412,7 +412,13 @@ def redownload_single_chapter(novel_id: int, chapter_num: int):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Redownload chapter failed: {str(e)}")
+        err_msg = str(e)
+        if "522" in err_msg or "timed out" in err_msg.lower():
+            raise HTTPException(
+                status_code=504, 
+                detail="เว็บต้นทาง (novel-lucky.com) ขัดข้องชั่วคราว (Cloudflare Error 522 / Connection Timed Out) ขณะนี้เซิร์ฟเวอร์ต้นทางไม่ตอบสนอง กรุณารอสักครู่แล้วลองใหม่ หรือกดปุ่ม '✨ เกลาบทนี้ใหม่' เพื่อให้ AI จัดการโดยตรงจากฐานข้อมูล"
+            )
+        raise HTTPException(status_code=500, detail=f"ไม่สามารถดาวน์โหลดบทนี้ใหม่ได้: {err_msg}")
 
 # Dynamic PostgreSQL Reader & TOC Routes
 @app.get("/novel/{slug}", response_class=HTMLResponse)
