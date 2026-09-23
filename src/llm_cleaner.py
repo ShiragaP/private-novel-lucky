@@ -197,10 +197,11 @@ class LLMChapterCleaner:
                 return False
 
             novel_id, c_num, title, raw_text = row
+            print(f"[LLM Cleaner] 🚀 [START] Cleaning Novel ID {novel_id} | บทที่ {c_num}: {title} (chars: {len(raw_text):,})...", flush=True)
             t0 = time.time()
             clean_res = self.clean_text(raw_text)
             if not clean_res.success:
-                print(f"[LLM Cleaner] ⚠️ Chapter {chapter_id} (ch {c_num}) cleaning failed. Preserving original text and keeping is_cleaned=FALSE for retry.", flush=True)
+                print(f"[LLM Cleaner] 🛑 [STOP] Novel ID {novel_id} | บทที่ {c_num}: {title} cleaning failed/stopped. Preserving original text and keeping is_cleaned=FALSE for retry.", flush=True)
                 return False
 
             cleaned_text = clean_res.text
@@ -270,7 +271,7 @@ class LLMChapterCleaner:
 
             tot_tokens = clean_res.prompt_tokens + clean_res.candidate_tokens
             print(
-                f"[LLM Auto-Cleaner] ✅ Cleaned Novel ID {novel_id} | Chap {c_num}: {title}\n"
+                f"[LLM Cleaner] 🏁 [FINISH] Novel ID {novel_id} | บทที่ {c_num}: {title}\n"
                 f"   ↳ {len(paras)} paras in {dur:.2f}s | Tokens: {tot_tokens:,} (Prompt: {clean_res.prompt_tokens:,}, Output: {clean_res.candidate_tokens:,})\n"
                 f"   ↳ Cost: ${clean_res.cost_usd:.5f} (~{clean_res.cost_thb:.3f}฿) | Session Total ({tot_chaps} chaps): ${tot_usd:.4f} (~{tot_thb:.2f}฿)",
                 flush=True
@@ -332,12 +333,12 @@ class AutoCleanerController:
     def pause(self):
         with self.lock:
             self.is_paused = True
-        print("[LLM Auto-Cleaner] ⏸️ Paused by user.", flush=True)
+        print("[LLM Auto-Cleaner] ⏸️ [STOP/PAUSE] Auto-cleaner paused by user. Processing stopped.", flush=True)
 
     def resume(self):
         with self.lock:
             self.is_paused = False
-        print("[LLM Auto-Cleaner] ▶️ Resumed by user (will clean pinned novels only).", flush=True)
+        print("[LLM Auto-Cleaner] ▶️ [START/RESUME] Auto-cleaner resumed by user. Will clean pinned novels.", flush=True)
 
     def get_status(self) -> Dict[str, Any]:
         with self.lock:

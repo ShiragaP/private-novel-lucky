@@ -480,13 +480,17 @@ def clean_single_chapter_endpoint(novel_id: int, chapter_num: int):
         raise HTTPException(status_code=404, detail="Chapter not found")
 
     chap_id = chap["id"]
+    chap_title = chap.get("title", f"บทที่ {chapter_num}")
+    print(f"[Manual Clean] 🚀 [START] User requested manual clean: Novel ID {novel_id}, Chapter {chapter_num} ({chap_title})", flush=True)
     success = cleaner.clean_chapter(chap_id, force=True)
     if not success:
+        print(f"[Manual Clean] 🛑 [STOP] Failed to clean Novel ID {novel_id}, Chapter {chapter_num} (quota or API error).", flush=True)
         raise HTTPException(
             status_code=429, 
             detail="ไม่สามารถเกลาบทนี้ได้ในขณะนี้ เนื่องจากติดโควต้า Vertex AI ชั่วคราว (429 RESOURCE_EXHAUSTED) กรุณารอสักครู่ (ประมาณ 30-60 วินาที) แล้วกดใหม่อีกครั้ง"
         )
 
+    print(f"[Manual Clean] 🏁 [FINISH] Novel ID {novel_id}, Chapter {chapter_num} completed successfully.", flush=True)
     updated = db.get_chapter(novel_id, chapter_num)
     return {
         "status": "ok",
