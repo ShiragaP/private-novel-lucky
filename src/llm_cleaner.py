@@ -74,7 +74,7 @@ SYSTEM_INSTRUCTION = """คุณเป็นผู้เชี่ยวชา�
 5. ให้ส่งออกเฉพาะเนื้อหานิยายที่จัดย่อหน้าแล้ว แต่ละย่อหน้าคั่นด้วยการขึ้นบรรทัดใหม่ 2 ครั้ง (\\n\\n) โดยไม่ต้องมีคำทักทายหรือคำอธิบายเพิ่มเติมใดๆ"""
 
 class LLMChapterCleaner:
-    def __init__(self):
+    def __init__(self, db: Optional[DatabaseManager] = None):
         self.project = os.environ.get("GOOGLE_CLOUD_PROJECT")
         self.location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
         self.model_name = os.environ.get("AI_MODEL", "gemini-3.5-flash")
@@ -94,7 +94,7 @@ class LLMChapterCleaner:
             location=self.location,
             credentials=self.creds
         )
-        self.db = DatabaseManager()
+        self.db = db or DatabaseManager()
 
         self.stats_lock = threading.Lock()
         self.total_chapters_cleaned = 0
@@ -212,51 +212,61 @@ class LLMChapterCleaner:
                 paras = [raw_text.strip()] if raw_text.strip() else []
             cleaned_html = "\n".join(f"<p>{p}</p>" for p in paras)
 
-            if self.db.is_postgres:
-                cur.execute("""
-                    UPDATE chapters 
-                    SET content_text = %s,
-                        content_html = %s,
-                        raw_content = COALESCE(raw_content, %s),
-                        is_cleaned = TRUE,
-                        cleaned_at = CURRENT_TIMESTAMP,
-                        prompt_tokens = %s,
-                        candidate_tokens = %s,
-                        cost_usd = %s,
-                        cost_thb = %s
-                    WHERE id = %s;
-                """, (cleaned_text, cleaned_html, raw_text, clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
-                cur.execute("""
-                    UPDATE novels
-                    SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + %s,
-                        total_candidate_tokens = COALESCE(total_candidate_tokens, 0) + %s,
-                        total_clean_cost_usd = COALESCE(total_clean_cost_usd, 0.0) + %s,
-                        total_clean_cost_thb = COALESCE(total_clean_cost_thb, 0.0) + %s
-                    WHERE id = %s;
-                """, (clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, novel_id))
-            else:
-                cur.execute("""
-                    UPDATE chapters 
-                    SET content_text = ?,
-                        content_html = ?,
-                        raw_content = COALESCE(raw_content, ?),
-                        is_cleaned = 1,
-                        cleaned_at = ?,
-                        prompt_tokens = ?,
-                        candidate_tokens = ?,
-                        cost_usd = ?,
-                        cost_thb = ?
-                    WHERE id = ?;
-                """, (cleaned_text, cleaned_html, raw_text, datetime.now().isoformat(), clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
-                cur.execute("""
-                    UPDATE novels
-                    SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + ?,
-                        total_candidate_tokens = COALESCE(total_candidate_tokens, 0) + ?,
-                        total_clean_cost_usd = COALESCE(total_clean_cost_usd, 0.0) + ?,
-                        total_clean_cost_thb = COALESCE(total_clean_cost_thb, 0.0) + ?
-                    WHERE id = ?;
-                """, (clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, novel_id))
-            conn.commit()
+            # Save cleaned text and update novel stats (with deadlock retry)
+            for db_attempt in range(1, 4):
+                try:
+                    if self.db.is_postgres:
+                        cur.execute("""
+                            UPDATE chapters 
+                            SET content_text = %s,
+                                content_html = %s,
+                                raw_content = COALESCE(raw_content, %s),
+                                is_cleaned = TRUE,
+                                cleaned_at = CURRENT_TIMESTAMP,
+                                prompt_tokens = %s,
+                                candidate_tokens = %s,
+                                cost_usd = %s,
+                                cost_thb = %s
+                            WHERE id = %s;
+                        """, (cleaned_text, cleaned_html, raw_text, clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
+                        cur.execute("""
+                            UPDATE novels
+                            SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + %s,
+                                total_candidate_tokens = COALESCE(total_candidate_tokens, 0) + %s,
+                                total_clean_cost_usd = COALESCE(total_clean_cost_usd, 0.0) + %s,
+                                total_clean_cost_thb = COALESCE(total_clean_cost_thb, 0.0) + %s
+                            WHERE id = %s;
+                        """, (clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, novel_id))
+                    else:
+                        cur.execute("""
+                            UPDATE chapters 
+                            SET content_text = ?,
+                                content_html = ?,
+                                raw_content = COALESCE(raw_content, ?),
+                                is_cleaned = 1,
+                                cleaned_at = ?,
+                                prompt_tokens = ?,
+                                candidate_tokens = ?,
+                                cost_usd = ?,
+                                cost_thb = ?
+                            WHERE id = ?;
+                        """, (cleaned_text, cleaned_html, raw_text, datetime.now().isoformat(), clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
+                        cur.execute("""
+                            UPDATE novels
+                            SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + ?,
+                                total_candidate_tokens = COALESCE(total_candidate_tokens, 0) + ?,
+                                total_clean_cost_usd = COALESCE(total_clean_cost_usd, 0.0) + ?,
+                                total_clean_cost_thb = COALESCE(total_clean_cost_thb, 0.0) + ?
+                            WHERE id = ?;
+                        """, (clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, novel_id))
+                    conn.commit()
+                    break
+                except Exception as ex:
+                    conn.rollback()
+                    if "deadlock" in str(ex).lower() and db_attempt < 3:
+                        time.sleep(0.5 * db_attempt)
+                        continue
+                    raise ex
             dur = time.time() - t0
 
             with self.stats_lock:
@@ -374,7 +384,7 @@ class AutoCleanerController:
 
 auto_cleaner_controller = AutoCleanerController()
 
-def start_background_auto_cleaner(workers: int = 1):
+def start_background_auto_cleaner(workers: int = 1, db: Optional[DatabaseManager] = None):
     """
     Spawns a background thread that continuously finds uncleaned chapters
     and processes them with Vertex AI LLM in the background.
@@ -395,7 +405,7 @@ def start_background_auto_cleaner(workers: int = 1):
         # Short initial delay to let server fully start up
         time.sleep(5)
         try:
-            cleaner = LLMChapterCleaner()
+            cleaner = LLMChapterCleaner(db=db)
             auto_cleaner_controller.cleaner = cleaner
         except Exception as e:
             print(f"[LLM Auto-Cleaner] Failed to initialize cleaner: {e}", flush=True)

@@ -28,6 +28,10 @@ class DatabaseManager:
     Unified database manager supporting both PostgreSQL and SQLite.
     Automatically connects to PostgreSQL if DATABASE_URL is set.
     """
+    _pool = None
+    _schema_initialized = False
+    _pool_lock = threading.Lock()
+
     def __init__(self, database_url: Optional[str] = None):
         _load_env_file()
         self.db_url = database_url or os.environ.get("DATABASE_URL")
@@ -43,25 +47,30 @@ class DatabaseManager:
             if self.db_url.startswith("postgres://"):
                 self.db_url = "postgresql://" + self.db_url[len("postgres://"):]
             
-            # Retry connecting up to 5 times (in case Postgres is booting up)
-            connected = False
-            for attempt in range(1, 6):
-                try:
-                    self.pool = ThreadedConnectionPool(minconn=1, maxconn=20, dsn=self.db_url)
-                    connected = True
-                    print(f"[Database] Connected to PostgreSQL successfully (attempt {attempt}).")
-                    break
-                except Exception as e:
-                    self.postgres_error = str(e)
-                    print(f"[Database] PostgreSQL connection attempt {attempt}/5 failed: {e}")
-                    if attempt < 5:
-                        import time
-                        time.sleep(2)
-            
-            if not connected:
-                raise RuntimeError(f"[Database] ERROR: Could not connect to PostgreSQL ({self.db_url}): {self.postgres_error}")
+            with DatabaseManager._pool_lock:
+                if DatabaseManager._pool is None:
+                    connected = False
+                    for attempt in range(1, 6):
+                        try:
+                            DatabaseManager._pool = ThreadedConnectionPool(minconn=2, maxconn=30, dsn=self.db_url)
+                            connected = True
+                            print(f"[Database] Connected to PostgreSQL successfully (attempt {attempt}).")
+                            break
+                        except Exception as e:
+                            self.postgres_error = str(e)
+                            print(f"[Database] PostgreSQL connection attempt {attempt}/5 failed: {e}")
+                            if attempt < 5:
+                                import time
+                                time.sleep(2)
+                    
+                    if not connected:
+                        raise RuntimeError(f"[Database] ERROR: Could not connect to PostgreSQL ({self.db_url}): {self.postgres_error}")
+            self.pool = DatabaseManager._pool
 
-        self.init_db()
+        with DatabaseManager._pool_lock:
+            if not DatabaseManager._schema_initialized:
+                self.init_db()
+                DatabaseManager._schema_initialized = True
 
     def _get_conn(self):
         if self.is_postgres:

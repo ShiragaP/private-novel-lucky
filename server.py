@@ -247,7 +247,7 @@ def on_startup():
     # Start auto-cleaning uncleaned chapters in background using Google Cloud Vertex AI
     try:
         from src.llm_cleaner import start_background_auto_cleaner
-        start_background_auto_cleaner(workers=1)
+        start_background_auto_cleaner(workers=1, db=db)
     except Exception as e:
         print(f"[Server] LLM background auto-cleaner startup error: {e}")
 
@@ -500,7 +500,7 @@ def clean_novel_endpoint(novel_id: int, background_tasks: BackgroundTasks):
     """
     try:
         from src.llm_cleaner import LLMChapterCleaner
-        cleaner = LLMChapterCleaner()
+        cleaner = LLMChapterCleaner(db=db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Vertex AI not configured: {str(e)}")
 
@@ -522,7 +522,7 @@ def clean_single_chapter_endpoint(novel_id: int, chapter_num: int):
     """
     try:
         from src.llm_cleaner import LLMChapterCleaner
-        cleaner = LLMChapterCleaner()
+        cleaner = LLMChapterCleaner(db=db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Vertex AI not configured: {str(e)}")
 
