@@ -357,6 +357,12 @@ class NovelDownloader:
         title = content.get("title") or chap.get("title")
         font_url = content.get("font_url")
 
+        # Sanity check: do not overwrite chapter with empty text or error page
+        if not content_text or len(content_text.strip()) < 50:
+            raise ValueError("เนื้อหาที่ได้รับจากเว็บต้นทางว่างเปล่าหรือสั้นเกินไป ไม่สามารถบันทึกทับได้")
+        if "Connection timed out" in title or "522" in title:
+            raise ValueError("เนื้อหาที่ได้รับเป็นหน้า Error 522 ของ Cloudflare ไม่สามารถบันทึกทับได้")
+
         # Save freshly fetched raw content and reset is_cleaned
         conn = self.db._get_conn()
         try:

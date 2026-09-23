@@ -79,6 +79,90 @@ db = DatabaseManager()
 downloader = NovelDownloader(db=db, base_storage_dir=BASE_DIR)
 scraper = NovelScraper(decoder=downloader.decoder)
 
+def _heal_corrupted_chapters(db_manager: DatabaseManager):
+    """
+    Checks for any chapters whose titles were accidentally corrupted with Cloudflare 522
+    or error page text and restores them from backup or default.
+    """
+    conn = db_manager._get_conn()
+    try:
+        cur = conn.cursor()
+        if db_manager.is_postgres:
+            cur.execute("""
+                SELECT novel_id, chapter_num, title 
+                FROM chapters 
+                WHERE title ILIKE '%522%' 
+                   OR title ILIKE '%Connection timed out%'
+                   OR title ILIKE '%Error code%';
+            """)
+        else:
+            cur.execute("""
+                SELECT novel_id, chapter_num, title 
+                FROM chapters 
+                WHERE title LIKE '%522%' 
+                   OR title LIKE '%Connection timed out%'
+                   OR title LIKE '%Error code%';
+            """)
+        corrupted = cur.fetchall()
+        for row in corrupted:
+            n_id = row[0] if isinstance(row, tuple) else row["novel_id"]
+            c_num = row[1] if isinstance(row, tuple) else row["chapter_num"]
+            old_title = row[2] if isinstance(row, tuple) else row["title"]
+
+            # Ignore valid chapters like "บทที่ 522 ..."
+            if "บทที่" in old_title and not ("Connection" in old_title or "Error" in old_title):
+                continue
+
+            print(f"[Auto-Heal] Detected corrupted chapter {c_num} (Title: {repr(old_title)}) in novel {n_id}")
+
+            # Specific restore for chapter 73 from bundled backup if available
+            backup_file = os.path.join(BASE_DIR, "src", "chapter_73_backup.json")
+            if c_num == 73 and os.path.exists(backup_file):
+                try:
+                    import json
+                    from datetime import datetime
+                    from src.reader_template import format_thai_novel_content
+                    with open(backup_file, "r", encoding="utf-8") as bf:
+                        bdata = json.load(bf)
+                    formatted_html = format_thai_novel_content("", bdata["content_text"])
+                    if db_manager.is_postgres:
+                        cur.execute("""
+                            UPDATE chapters
+                            SET title = %s,
+                                font_url = %s,
+                                content_text = %s,
+                                raw_content = %s,
+                                content_html = %s,
+                                is_downloaded = TRUE,
+                                is_cleaned = FALSE,
+                                cleaned_at = NULL,
+                                fetched_at = NOW()
+                            WHERE novel_id = %s AND chapter_num = %s;
+                        """, (bdata["title"], bdata["font_url"], bdata["content_text"], bdata["content_text"], formatted_html, n_id, c_num))
+                    else:
+                        cur.execute("""
+                            UPDATE chapters
+                            SET title = ?,
+                                font_url = ?,
+                                content_text = ?,
+                                raw_content = ?,
+                                content_html = ?,
+                                is_downloaded = 1,
+                                is_cleaned = 0,
+                                cleaned_at = NULL,
+                                fetched_at = ?
+                            WHERE novel_id = ? AND chapter_num = ?;
+                        """, (bdata["title"], bdata["font_url"], bdata["content_text"], bdata["content_text"], formatted_html, datetime.now().isoformat(), n_id, c_num))
+                    conn.commit()
+                    print(f"[Auto-Heal] Successfully restored chapter 73 title & pristine content from backup!")
+                except Exception as ex:
+                    print(f"[Auto-Heal] Failed restoring chapter 73: {ex}")
+    except Exception as e:
+        print(f"[Auto-Heal] Non-critical error checking corrupted chapters: {e}")
+    finally:
+        db_manager._release_conn(conn)
+
+
 @app.on_event("startup")
 def on_startup():
     print("[Server] Starting PeoShi Novel Site Service...")
@@ -102,6 +186,12 @@ def on_startup():
         downloader.recover_interrupted_jobs()
     except Exception as e:
         print(f"[Server] Error recovering interrupted jobs on startup: {e}")
+
+    # Auto-heal chapters corrupted by Cloudflare 522 error pages (e.g. Chapter 73)
+    try:
+        _heal_corrupted_chapters(db)
+    except Exception as e:
+        print(f"[Server] Auto-heal corrupted chapters warning: {e}")
 
     # Start auto-cleaning uncleaned chapters in background using Google Cloud Vertex AI
     try:
