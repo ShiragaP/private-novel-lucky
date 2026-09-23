@@ -77,7 +77,7 @@ class LLMChapterCleaner:
     def __init__(self):
         self.project = os.environ.get("GOOGLE_CLOUD_PROJECT")
         self.location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
-        self.model_name = os.environ.get("AI_MODEL", "gemini-3.7-flash")
+        self.model_name = os.environ.get("AI_MODEL", "gemini-3.5-flash")
         self.b64_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_BASE64", "")
         
         if not self.project or not self.b64_creds:
