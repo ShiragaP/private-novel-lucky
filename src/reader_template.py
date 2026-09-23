@@ -484,13 +484,25 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
 
     novel_id = novel.get("id", 0)
     if not is_dl:
-        status_bar_html = '<div class="chapter-status-pill badge-not-ready"><span>⚠️</span> ตอนนี้ยังไม่พร้อมอ่าน (ยังไม่ได้ดาวน์โหลดเนื้อหา)</div>'
+        status_bar_html = f'''<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom: 20px;">
+            <div id="chapStatusPill" class="chapter-status-pill badge-not-ready" style="margin-bottom:0;"><span>⚠️</span> ตอนนี้ยังไม่พร้อมอ่าน (ยังไม่ได้ดาวน์โหลด)</div>
+            <button id="btnRedownloadCurrentChap" class="btn-control" onclick="redownloadCurrentChapter({novel_id}, {chap_num})" style="cursor:pointer;" title="ดาวน์โหลดบทนี้ใหม่จากเว็บต้นทาง">🔄 โหลดบทนี้ใหม่</button>
+        </div>'''
     elif is_cl:
-        status_bar_html = '<div id="chapStatusPill" class="chapter-status-pill badge-cleaned"><span>✨</span> ตอนนี้ผ่านการเกลาภาษาและจัดย่อหน้าโดย AI แล้ว</div>'
+        status_bar_html = f'''<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom: 20px;">
+            <div id="chapStatusPill" class="chapter-status-pill badge-cleaned" style="margin-bottom:0;"><span>✨</span> ตอนนี้ผ่านการเกลาภาษาและจัดย่อหน้าโดย AI แล้ว</div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button id="btnRedownloadCurrentChap" class="btn-control" onclick="redownloadCurrentChapter({novel_id}, {chap_num})" style="cursor:pointer;" title="ดาวน์โหลดเนื้อหาบทนี้ใหม่จากเว็บต้นทาง">🔄 โหลดบทนี้ใหม่</button>
+                <button id="btnCleanCurrentChap" class="btn-control" onclick="cleanCurrentChapter({novel_id}, {chap_num})" style="background:#7c3aed; color:#fff; border-color:#6d28d9; font-weight:600; cursor:pointer;" title="สั่งให้ AI เกลาและจัดย่อหน้าบทนี้ใหม่อีกครั้ง">✨ เกลาบทนี้ใหม่</button>
+            </div>
+        </div>'''
     else:
         status_bar_html = f'''<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom: 20px;">
             <div id="chapStatusPill" class="chapter-status-pill badge-raw" style="margin-bottom:0;"><span>⏳</span> ตอนนี้เป็นฉบับดิบ (รอเกลาภาษา)</div>
-            <button id="btnCleanCurrentChap" class="btn-control" onclick="cleanCurrentChapter({novel_id}, {chap_num})" style="background:#7c3aed; color:#fff; border-color:#6d28d9; font-weight:600; cursor:pointer;" title="สั่งให้ AI เกลาภาษาบทนี้ทันที">✨ เกลาบทนี้ทันทีด้วย AI</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button id="btnRedownloadCurrentChap" class="btn-control" onclick="redownloadCurrentChapter({novel_id}, {chap_num})" style="cursor:pointer;" title="ดาวน์โหลดเนื้อหาบทนี้ใหม่จากเว็บต้นทาง">🔄 โหลดบทนี้ใหม่</button>
+                <button id="btnCleanCurrentChap" class="btn-control" onclick="cleanCurrentChapter({novel_id}, {chap_num})" style="background:#7c3aed; color:#fff; border-color:#6d28d9; font-weight:600; cursor:pointer;" title="สั่งให้ AI เกลาภาษาบทนี้ทันที">✨ เกลาบทนี้ทันทีด้วย AI</button>
+            </div>
         </div>'''
 
     # Content paragraphs
@@ -596,7 +608,46 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
             {'if (e.key === "ArrowRight") window.location.href = "' + next_url + '";' if next_url else ''}
         }});
 
-        // Dynamic Chapter Clean
+        // Redownload Current Chapter from Source
+        async function redownloadCurrentChapter(novelId, chapNum) {{
+            const btn = document.getElementById('btnRedownloadCurrentChap');
+            const pill = document.getElementById('chapStatusPill');
+            const readingText = document.getElementById('readingText');
+            const cleanBtn = document.getElementById('btnCleanCurrentChap');
+            if (!confirm('คุณต้องการดาวน์โหลดเนื้อหาบทนี้ใหม่จากเว็บต้นทางใช่หรือไม่?\\n(ระบบจะดึงเนื้อหาต้นฉบับดิบใหม่อีกครั้ง)')) return;
+            if (btn) {{
+                btn.disabled = true;
+                btn.textContent = '⏳ กำลังดาวน์โหลดใหม่...';
+            }}
+            try {{
+                const res = await fetch(`/api/chapters/${{novelId}}/${{chapNum}}/redownload`, {{ method: 'POST' }});
+                const data = await res.json();
+                if (res.ok && data.content_html) {{
+                    readingText.innerHTML = data.content_html;
+                    if (pill) {{
+                        pill.className = 'chapter-status-pill badge-raw';
+                        pill.innerHTML = '<span>⏳</span> ตอนนี้เป็นฉบับดิบ (ดาวน์โหลดใหม่แล้ว - รอเกลาภาษา)';
+                    }}
+                    if (cleanBtn) {{
+                        cleanBtn.style.display = 'inline-flex';
+                        cleanBtn.textContent = '✨ เกลาบทนี้ทันทีด้วย AI';
+                        cleanBtn.disabled = false;
+                    }}
+                    alert('✅ ดาวน์โหลดบทนี้ใหม่เรียบร้อยแล้ว (เป็นฉบับดิบจากต้นทาง)');
+                }} else {{
+                    alert('❌ เกิดข้อผิดพลาด: ' + (data.detail || data.message));
+                }}
+            }} catch (e) {{
+                alert('เกิดข้อผิดพลาดในการโหลดบทนี้ใหม่: ' + e.message);
+            }} finally {{
+                if (btn) {{
+                    btn.disabled = false;
+                    btn.textContent = '🔄 โหลดบทนี้ใหม่';
+                }}
+            }}
+        }}
+
+        // Dynamic Chapter Clean / Re-clean
         async function cleanCurrentChapter(novelId, chapNum) {{
             const btn = document.getElementById('btnCleanCurrentChap');
             const pill = document.getElementById('chapStatusPill');
@@ -615,20 +666,22 @@ def render_chapter_page(novel: Dict[str, Any], current_chapter: Dict[str, Any], 
                         pill.innerHTML = '<span>✨</span> ตอนนี้ผ่านการเกลาภาษาและจัดย่อหน้าโดย AI แล้ว';
                     }}
                     if (btn) {{
-                        btn.style.display = 'none';
+                        btn.style.display = 'inline-flex';
+                        btn.textContent = '✨ เกลาบทนี้ใหม่';
+                        btn.disabled = false;
                     }}
                 }} else {{
                     alert(data.detail || data.message || 'ไม่สามารถเกลาบทนี้ได้');
                     if (btn) {{
                         btn.disabled = false;
-                        btn.textContent = '✨ เกลาบทนี้ทันทีด้วย AI';
+                        btn.textContent = '✨ เกลาบทนี้ใหม่';
                     }}
                 }}
             }} catch (e) {{
                 alert('เกิดข้อผิดพลาดในการเกลาบทนี้: ' + e.message);
                 if (btn) {{
                     btn.disabled = false;
-                    btn.textContent = '✨ เกลาบทนี้ทันทีด้วย AI';
+                    btn.textContent = '✨ เกลาบทนี้ใหม่';
                 }}
             }}
         }}

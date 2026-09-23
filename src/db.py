@@ -127,6 +127,7 @@ class DatabaseManager:
                     ALTER TABLE chapters ADD COLUMN IF NOT EXISTS candidate_tokens INTEGER DEFAULT 0;
                     ALTER TABLE chapters ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(10, 6) DEFAULT 0.0;
                     ALTER TABLE chapters ADD COLUMN IF NOT EXISTS cost_thb NUMERIC(10, 4) DEFAULT 0.0;
+                    ALTER TABLE chapters ADD COLUMN IF NOT EXISTS raw_content TEXT;
 
                     CREATE TABLE IF NOT EXISTS font_mappings (
                         font_url TEXT PRIMARY KEY,
@@ -208,6 +209,8 @@ class DatabaseManager:
                     cur.execute("ALTER TABLE chapters ADD COLUMN cost_usd REAL DEFAULT 0.0;")
                 if "cost_thb" not in chap_cols:
                     cur.execute("ALTER TABLE chapters ADD COLUMN cost_thb REAL DEFAULT 0.0;")
+                if "raw_content" not in chap_cols:
+                    cur.execute("ALTER TABLE chapters ADD COLUMN raw_content TEXT;")
 
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS font_mappings (
@@ -429,16 +432,16 @@ class DatabaseManager:
                 cur.execute("""
                     UPDATE chapters
                     SET title = %s, font_url = %s, content_text = %s, content_html = %s,
-                        is_downloaded = TRUE, fetched_at = NOW()
+                        raw_content = %s, is_downloaded = TRUE, fetched_at = NOW()
                     WHERE novel_id = %s AND chapter_num = %s
-                """, (title, font_url, content_text, content_html, novel_id, chapter_num))
+                """, (title, font_url, content_text, content_html, content_text, novel_id, chapter_num))
             else:
                 cur.execute("""
                     UPDATE chapters
                     SET title = ?, font_url = ?, content_text = ?, content_html = ?,
-                        is_downloaded = 1, fetched_at = ?
+                        raw_content = ?, is_downloaded = 1, fetched_at = ?
                     WHERE novel_id = ? AND chapter_num = ?
-                """, (title, font_url, content_text, content_html, now, novel_id, chapter_num))
+                """, (title, font_url, content_text, content_html, content_text, now, novel_id, chapter_num))
             conn.commit()
         finally:
             self._release_conn(conn)
@@ -714,6 +717,7 @@ class DatabaseManager:
                         is_cleaned = FALSE,
                         content_text = NULL,
                         content_html = NULL,
+                        raw_content = NULL,
                         font_url = NULL,
                         cleaned_at = NULL,
                         fetched_at = NULL,
@@ -742,6 +746,7 @@ class DatabaseManager:
                         is_cleaned = 0,
                         content_text = NULL,
                         content_html = NULL,
+                        raw_content = NULL,
                         font_url = NULL,
                         cleaned_at = NULL,
                         fetched_at = NULL,

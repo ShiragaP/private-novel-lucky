@@ -180,8 +180,20 @@ class NovelScraper:
         """
         Fetches and decodes a chapter's content with LuckyNovelGlyphShield font de-obfuscation.
         """
-        resp = self.client.get(chapter_url)
-        resp.raise_for_status()
+        import time
+        last_exc = None
+        resp = None
+        for attempt in range(1, 4):
+            try:
+                resp = self.client.get(chapter_url)
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                last_exc = e
+                if attempt < 3:
+                    time.sleep(1.5 * attempt)
+        if not resp:
+            raise last_exc
         soup = BeautifulSoup(resp.text, "lxml")
 
         # Chapter Title

@@ -40,10 +40,8 @@ Thumbs.db
 desktop.ini
 *.tmp
 
-# Cache and Data
+# Generated static novel files
+novels/
 cache/
 data/
 
-# Generated static novel files
-novels/**/*.html
-**/chapters/

@@ -338,3 +338,57 @@ class NovelDownloader:
             if os.path.exists(novel_dir):
                 import shutil
                 shutil.rmtree(novel_dir, ignore_errors=True)
+
+    def redownload_chapter(self, novel_id: int, chapter_num: int) -> Dict[str, Any]:
+        """
+        Re-scrapes a single chapter from the website, stores raw content,
+        and resets its cleaned status so it can be read raw or re-cleaned.
+        """
+        chap = self.db.get_chapter(novel_id, chapter_num)
+        if not chap:
+            raise ValueError(f"Chapter {chapter_num} of Novel ID {novel_id} not found")
+
+        chap_url = chap.get("url")
+        if not chap_url:
+            raise ValueError(f"No source URL found for chapter {chapter_num}")
+
+        content = self.scraper.fetch_chapter_content(chap_url, db=self.db)
+        content_text = content.get("content_text", "")
+        title = content.get("title") or chap.get("title")
+        font_url = content.get("font_url")
+
+        # Save freshly fetched raw content and reset is_cleaned
+        conn = self.db._get_conn()
+        try:
+            cur = conn.cursor()
+            if self.db.is_postgres:
+                cur.execute("""
+                    UPDATE chapters
+                    SET title = %s, font_url = %s, content_text = %s, content_html = NULL,
+                        raw_content = %s, is_downloaded = TRUE, is_cleaned = FALSE,
+                        cleaned_at = NULL, fetched_at = NOW()
+                    WHERE novel_id = %s AND chapter_num = %s;
+                """, (title, font_url, content_text, content_text, novel_id, chapter_num))
+            else:
+                cur.execute("""
+                    UPDATE chapters
+                    SET title = ?, font_url = ?, content_text = ?, content_html = NULL,
+                        raw_content = ?, is_downloaded = 1, is_cleaned = 0,
+                        cleaned_at = NULL, fetched_at = ?
+                    WHERE novel_id = ? AND chapter_num = ?;
+                """, (title, font_url, content_text, content_text, datetime.now().isoformat(), novel_id, chapter_num))
+            conn.commit()
+        finally:
+            self.db._release_conn(conn)
+
+        from .reader_template import format_thai_novel_content
+        formatted_html = format_thai_novel_content("", content_text)
+
+        return {
+            "status": "ok",
+            "novel_id": novel_id,
+            "chapter_num": chapter_num,
+            "title": title,
+            "content_html": formatted_html,
+            "content_text": content_text
+        }

@@ -57,22 +57,25 @@ SYSTEM_INSTRUCTION = """คุณเป็นผู้เชี่ยวชา�
 
 กฎเหล็กที่ต้องปฏิบัติตามอย่างเคร่งครัด:
 1. ห้ามแก้ไข ดัดแปลง ตัดทอน หรือแต่งเติมเนื้อเรื่องเด็ดขาด (คงคำศัพท์และสำนวนเดิมของผู้เขียนไว้ 100%)
-2. เชื่อมต่อคำหรือประโยคที่ถูกตัดท่อนกลางคันให้กลายเป็นประโยคสมบูรณ์ เช่น:
-   - "เด็กคน" กับ "นี้" -> "เด็กคนนี้"
-   - "สิ่งมีชีวิตใน" กับ "ตำนาน" -> "สิ่งมีชีวิตในตำนาน"
-   - "ทั้งเก่า" กับ "และใหม่" -> "ทั้งเก่าและใหม่"
-   - "คลืบคลานมา" กับ "ใกล้" -> "คลืบคลานมาใกล้"
-3. แยกบทสนทนา:
-   - บทสนทนาที่มีเครื่องหมายคำพูด (“...”) ของแต่ละบุคคล ต้องอยู่คนละย่อหน้าเสมอ ห้ามนำมารวมกันเด็ดขาด
-   - หากมีบทสนทนา 2 คนอยู่ติดกันในบรรทัดเดียว ให้ตัดแบ่งขึ้นบรรทัดใหม่
-4. ย่อหน้าบรรยาย: ประโยคบรรยายที่ต่อเนื่องกันให้รวมเป็นย่อหน้าเดียวกัน
+2. ห้ามแปลงภาษาเด็ดขาด: ห้ามเปลี่ยนคำไทยเป็นภาษาอังกฤษ ห้ามแปลงเป็นอักษรโรมันหรือคาราโอเกะ (เช่น ห้ามเปลี่ยน 'โกน' เป็น 'ogon') และห้ามแปลเป็นภาษาอื่น
+3. รักษาตัวสะกด สระ วรรณยุกต์ และเครื่องหมายคำพูดภาษาไทยทุกตัวให้เหมือนเดิมทุกประการ 100%
+4. หน้าที่ของคุณมีเพียง 2 อย่างเท่านั้น:
+   - เชื่อมต่อคำหรือประโยคที่ถูกตัดท่อนกลางคันให้กลายเป็นประโยคสมบูรณ์ เช่น:
+     - "เด็กคน" กับ "นี้" -> "เด็กคนนี้"
+     - "สิ่งมีชีวิตใน" กับ "ตำนาน" -> "สิ่งมีชีวิตในตำนาน"
+     - "ทั้งเก่า" กับ "และใหม่" -> "ทั้งเก่าและใหม่"
+     - "คลืบคลานมา" กับ "ใกล้" -> "คลืบคลานมาใกล้"
+   - จัดย่อหน้าให้อ่านง่าย:
+     - บทสนทนาที่มีเครื่องหมายคำพูด (“...”) ของแต่ละบุคคล ต้องอยู่คนละย่อหน้าเสมอ ห้ามนำมารวมกันเด็ดขาด
+     - หากมีบทสนทนา 2 คนอยู่ติดกันในบรรทัดเดียว ให้ตัดแบ่งขึ้นบรรทัดใหม่
+     - ย่อหน้าบรรยายที่ต่อเนื่องกันให้รวมเป็นย่อหน้าเดียวกัน
 5. ให้ส่งออกเฉพาะเนื้อหานิยายที่จัดย่อหน้าแล้ว แต่ละย่อหน้าคั่นด้วยการขึ้นบรรทัดใหม่ 2 ครั้ง (\\n\\n) โดยไม่ต้องมีคำทักทายหรือคำอธิบายเพิ่มเติมใดๆ"""
 
 class LLMChapterCleaner:
     def __init__(self):
         self.project = os.environ.get("GOOGLE_CLOUD_PROJECT")
         self.location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
-        self.model_name = os.environ.get("AI_MODEL", "gemini-3.5-flash-lite")
+        self.model_name = os.environ.get("AI_MODEL", "gemini-3.8-flash")
         self.b64_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_BASE64", "")
         
         if not self.project or not self.b64_creds:
@@ -114,7 +117,7 @@ class LLMChapterCleaner:
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
-                        temperature=0.1,
+                        temperature=0.0,
                         safety_settings=SAFETY_SETTINGS,
                     )
                 )
@@ -168,13 +171,13 @@ class LLMChapterCleaner:
             cur = conn.cursor()
             if self.db.is_postgres:
                 cur.execute("""
-                    SELECT novel_id, chapter_num, title, content_text 
+                    SELECT novel_id, chapter_num, title, COALESCE(raw_content, content_text) 
                     FROM chapters 
                     WHERE id = %s;
                 """, (chapter_id,))
             else:
                 cur.execute("""
-                    SELECT novel_id, chapter_num, title, content_text 
+                    SELECT novel_id, chapter_num, title, COALESCE(raw_content, content_text) 
                     FROM chapters 
                     WHERE id = ?;
                 """, (chapter_id,))
@@ -198,6 +201,7 @@ class LLMChapterCleaner:
                     UPDATE chapters 
                     SET content_text = %s,
                         content_html = %s,
+                        raw_content = COALESCE(raw_content, %s),
                         is_cleaned = TRUE,
                         cleaned_at = CURRENT_TIMESTAMP,
                         prompt_tokens = %s,
@@ -205,7 +209,7 @@ class LLMChapterCleaner:
                         cost_usd = %s,
                         cost_thb = %s
                     WHERE id = %s;
-                """, (cleaned_text, cleaned_html, clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
+                """, (cleaned_text, cleaned_html, raw_text, clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
                 cur.execute("""
                     UPDATE novels
                     SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + %s,
@@ -219,6 +223,7 @@ class LLMChapterCleaner:
                     UPDATE chapters 
                     SET content_text = ?,
                         content_html = ?,
+                        raw_content = COALESCE(raw_content, ?),
                         is_cleaned = 1,
                         cleaned_at = ?,
                         prompt_tokens = ?,
@@ -226,7 +231,7 @@ class LLMChapterCleaner:
                         cost_usd = ?,
                         cost_thb = ?
                     WHERE id = ?;
-                """, (cleaned_text, cleaned_html, datetime.now().isoformat(), clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
+                """, (cleaned_text, cleaned_html, raw_text, datetime.now().isoformat(), clean_res.prompt_tokens, clean_res.candidate_tokens, clean_res.cost_usd, clean_res.cost_thb, chapter_id))
                 cur.execute("""
                     UPDATE novels
                     SET total_prompt_tokens = COALESCE(total_prompt_tokens, 0) + ?,

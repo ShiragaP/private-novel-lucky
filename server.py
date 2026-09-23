@@ -401,6 +401,19 @@ def clean_single_chapter_endpoint(novel_id: int, chapter_num: int):
         "content_html": updated.get("content_html", "")
     }
 
+@app.post("/api/chapters/{novel_id}/{chapter_num}/redownload")
+def redownload_single_chapter(novel_id: int, chapter_num: int):
+    """
+    Re-scrapes a single chapter from source, resets is_cleaned, and returns raw formatted HTML.
+    """
+    try:
+        result = downloader.redownload_chapter(novel_id, chapter_num)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Redownload chapter failed: {str(e)}")
+
 # Dynamic PostgreSQL Reader & TOC Routes
 @app.get("/novel/{slug}", response_class=HTMLResponse)
 def view_novel_toc(slug: str):
