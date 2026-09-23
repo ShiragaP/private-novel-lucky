@@ -196,7 +196,7 @@ def on_startup():
     # Start auto-cleaning uncleaned chapters in background using Google Cloud Vertex AI
     try:
         from src.llm_cleaner import start_background_auto_cleaner
-        start_background_auto_cleaner(workers=2)
+        start_background_auto_cleaner(workers=1)
     except Exception as e:
         print(f"[Server] LLM background auto-cleaner startup error: {e}")
 
@@ -479,10 +479,12 @@ def clean_single_chapter_endpoint(novel_id: int, chapter_num: int):
     if not chap:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    chap_id = chap["id"]
     success = cleaner.clean_chapter(chap_id, force=True)
     if not success:
-        raise HTTPException(status_code=500, detail="Failed to clean chapter")
+        raise HTTPException(
+            status_code=429, 
+            detail="ไม่สามารถเกลาบทนี้ได้ในขณะนี้ เนื่องจากติดโควต้า Vertex AI ชั่วคราว (429 RESOURCE_EXHAUSTED) กรุณารอสักครู่ (ประมาณ 30-60 วินาที) แล้วกดใหม่อีกครั้ง"
+        )
 
     updated = db.get_chapter(novel_id, chapter_num)
     return {

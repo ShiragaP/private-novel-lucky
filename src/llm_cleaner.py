@@ -25,6 +25,7 @@ class CleanResult(NamedTuple):
     candidate_tokens: int = 0
     cost_usd: float = 0.0
     cost_thb: float = 0.0
+    success: bool = True
 
     def __str__(self):
         return self.text
@@ -102,12 +103,13 @@ class LLMChapterCleaner:
         self.total_cost_usd = 0.0
         self.total_cost_thb = 0.0
 
-    def clean_text(self, raw_text: str, max_retries: int = 3) -> CleanResult:
+    def clean_text(self, raw_text: str, max_retries: int = 5) -> CleanResult:
         """
         Calls Gemini Flash on Vertex AI to clean broken line wraps in Thai novel text.
+        Handles 429 RESOURCE_EXHAUSTED with exponential backoff.
         """
         if not raw_text or not raw_text.strip():
-            return CleanResult(text="")
+            return CleanResult(text="", success=True)
 
         prompt = f"กรุณาจัดย่อหน้าข้อความนิยายต่อไปนี้ให้ถูกต้องตามกฎ:\n\n{raw_text.strip()}"
         
@@ -146,19 +148,27 @@ class LLMChapterCleaner:
                         prompt_tokens=p_tok,
                         candidate_tokens=c_tok,
                         cost_usd=cost_usd,
-                        cost_thb=cost_thb
+                        cost_thb=cost_thb,
+                        success=True
                     )
                 else:
                     print(f"[LLM Cleaner] Attempt {attempt}/{max_retries} returned empty response. Retrying...", flush=True)
                     if attempt < max_retries:
                         time.sleep(2 * attempt)
             except Exception as e:
-                print(f"[LLM Cleaner] Error on attempt {attempt}/{max_retries}: {e}", flush=True)
-                if attempt < max_retries:
-                    time.sleep(2 * attempt)
+                err_str = str(e)
+                is_rate_limit = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+                if is_rate_limit:
+                    sleep_sec = min(60, 8 * (2 ** (attempt - 1)))  # 8s, 16s, 32s, 60s
+                    print(f"[LLM Cleaner] ⏳ Quota rate-limit (429 RESOURCE_EXHAUSTED) on attempt {attempt}/{max_retries}. Waiting {sleep_sec}s for quota window to reset...", flush=True)
+                    time.sleep(sleep_sec)
+                else:
+                    print(f"[LLM Cleaner] Error on attempt {attempt}/{max_retries}: {e}", flush=True)
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
 
-        print(f"[LLM Cleaner] Warning: All {max_retries} attempts failed to produce cleaned text. Falling back to original text.", flush=True)
-        return CleanResult(text=raw_text)
+        print(f"[LLM Cleaner] Warning: All {max_retries} attempts failed. Aborting clean for this chapter.", flush=True)
+        return CleanResult(text=raw_text, success=False)
 
     def clean_chapter(self, chapter_id: int, force: bool = False) -> bool:
         """
@@ -189,6 +199,10 @@ class LLMChapterCleaner:
             novel_id, c_num, title, raw_text = row
             t0 = time.time()
             clean_res = self.clean_text(raw_text)
+            if not clean_res.success:
+                print(f"[LLM Cleaner] ⚠️ Chapter {chapter_id} (ch {c_num}) cleaning failed. Preserving original text and keeping is_cleaned=FALSE for retry.", flush=True)
+                return False
+
             cleaned_text = clean_res.text
 
             # Generate clean HTML paragraphs
@@ -359,7 +373,7 @@ class AutoCleanerController:
 
 auto_cleaner_controller = AutoCleanerController()
 
-def start_background_auto_cleaner(workers: int = 2):
+def start_background_auto_cleaner(workers: int = 1):
     """
     Spawns a background thread that continuously finds uncleaned chapters
     and processes them with Vertex AI LLM in the background.
@@ -441,23 +455,25 @@ def start_background_auto_cleaner(workers: int = 2):
 
             auto_cleaner_controller.is_running = True
             print(f"[LLM Auto-Cleaner] Processing batch of {len(batch)} uncleaned chapters from pinned novels...", flush=True)
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = {executor.submit(cleaner.clean_chapter, ch[0]): ch for ch in batch}
-                for f in as_completed(futures):
-                    ch = futures[f]
-                    try:
-                        res = f.result()
-                        if res:
-                            print(f"[LLM Auto-Cleaner] ✨ Finished Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]}", flush=True)
-                        else:
-                            print(f"[LLM Auto-Cleaner] ⚠️ Skipped Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]} (empty content or paused)", flush=True)
-                    except Exception as e:
-                        print(f"[LLM Auto-Cleaner] ❌ Error cleaning Novel ID {ch[1]} Chapter {ch[2]}: {e}", flush=True)
-                        time.sleep(5)  # small pause if rate-limited
+            for ch in batch:
+                if auto_cleaner_controller.is_paused:
+                    print(f"[LLM Auto-Cleaner] Paused by user during batch.", flush=True)
+                    break
+                try:
+                    res = cleaner.clean_chapter(ch[0])
+                    if res:
+                        print(f"[LLM Auto-Cleaner] ✨ Finished Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]}", flush=True)
+                        time.sleep(1.0)  # Gentle spacing to avoid Vertex AI RPM limits
+                    else:
+                        print(f"[LLM Auto-Cleaner] ⚠️ Skipped / Failed Novel ID {ch[1]} | Chapter {ch[2]}: {ch[3]}", flush=True)
+                        time.sleep(5.0)  # Pause longer if failure or quota limit occurred
+                except Exception as e:
+                    print(f"[LLM Auto-Cleaner] ❌ Error cleaning Novel ID {ch[1]} Chapter {ch[2]}: {e}", flush=True)
+                    time.sleep(10.0)
 
             auto_cleaner_controller.is_running = False
-            print(f"[LLM Auto-Cleaner] Batch of {len(batch)} chapters finished. Total session cost: ${cleaner.total_cost_usd:.4f} (~{cleaner.total_cost_thb:.2f}฿ for {cleaner.total_chapters_cleaned} chaps). Waiting for next batch...", flush=True)
-            time.sleep(2)  # small pause between batches
+            print(f"[LLM Auto-Cleaner] Batch finished. Total session cost: ${cleaner.total_cost_usd:.4f} (~{cleaner.total_cost_thb:.2f}฿ for {cleaner.total_chapters_cleaned} chaps). Waiting for next batch...", flush=True)
+            time.sleep(3)
 
     t = threading.Thread(target=_worker_loop, daemon=True, name="LLMAutoCleanerThread")
     t.start()
